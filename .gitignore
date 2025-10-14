@@ -40,6 +40,10 @@ ENV/
 env/
 backend/.env
 
+# --- Environment files (root) ---
+.env
+.env.*
+
 # --- Uploads & Generated Assets ---
 uploads/*
 !uploads/.gitkeep
