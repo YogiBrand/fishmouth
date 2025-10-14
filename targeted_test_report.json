@@ -1,0 +1,165 @@
+{
+  "summary": {
+    "total_tests": 5,
+    "passed": 4,
+    "failed": 1,
+    "skipped": 0,
+    "success_rate": 80.0,
+    "total_duration": 1.2448511123657227,
+    "available_services": [
+      "enrichment",
+      "image_processor"
+    ]
+  },
+  "test_results": [
+    {
+      "test_name": "Enrichment Service Health Check",
+      "status": "PASS",
+      "duration": 0.0026578903198242188,
+      "details": {
+        "status_code": 200,
+        "response": {
+          "status": "healthy",
+          "timestamp": "2025-10-14T07:33:36.467777",
+          "services": {
+            "database": "ok",
+            "redis": "ok",
+            "enrichers": "ok"
+          }
+        },
+        "service_port": 8004
+      },
+      "error": null
+    },
+    {
+      "test_name": "Database Connection & Schema Test",
+      "status": "PASS",
+      "duration": 0.031501054763793945,
+      "details": {
+        "postgres_version": [
+          "PostgreSQL",
+          "15.14"
+        ],
+        "table_count": 29,
+        "tables": [
+          "ai_configurations",
+          "area_scans",
+          "city_scrape_configs",
+          "data_sources",
+          "enrichment_jobs",
+          "job_schedules",
+          "lead_activities",
+          "lead_scores",
+          "leads",
+          "property_images",
+          "raw_contractors",
+          "raw_permits",
+          "raw_properties",
+          "roof_analysis",
+          "scraping_cache",
+          "scraping_errors",
+          "scraping_jobs",
+          "sequence_enrollments",
+          "sequence_executions",
+          "sequence_nodes",
+          "sequences",
+          "system_health",
+          "users",
+          "voice_bookings",
+          "voice_call_events",
+          "voice_call_turns",
+          "voice_calls",
+          "voice_configurations",
+          "voice_metrics_daily"
+        ],
+        "connection_config": {
+          "host": "localhost",
+          "port": 5432,
+          "database": "fishmouth",
+          "user": "fishmouth"
+        }
+      },
+      "error": null
+    },
+    {
+      "test_name": "Redis Connection & Operations Test",
+      "status": "PASS",
+      "duration": 0.0035200119018554688,
+      "details": {
+        "redis_version": "7.4.6",
+        "used_memory": "1.08M",
+        "connected_clients": 2,
+        "test_operation": "Success",
+        "keyspace": {
+          "keys": 1,
+          "expires": 1,
+          "avg_ttl": 0,
+          "subexpiry": 0
+        }
+      },
+      "error": null
+    },
+    {
+      "test_name": "Enrichment Service Functionality",
+      "status": "FAIL",
+      "duration": 0.0017232894897460938,
+      "details": {
+        "status_code": 404
+      },
+      "error": "Enrichment service returned status 404"
+    },
+    {
+      "test_name": "System Performance Metrics",
+      "status": "PASS",
+      "duration": 1.205448865890503,
+      "details": {
+        "cpu_usage_percent": 1.0,
+        "memory_usage_percent": 5.2,
+        "memory_available_mb": 733827,
+        "disk_usage_percent": 97.2,
+        "disk_free_gb": 6,
+        "fishmouth_containers": [
+          {
+            "pid": 727871,
+            "name": "bash",
+            "memory_mb": 3,
+            "cpu_percent": 0
+          },
+          {
+            "pid": 727906,
+            "name": "node",
+            "memory_mb": 43,
+            "cpu_percent": 0
+          },
+          {
+            "pid": 727913,
+            "name": "node",
+            "memory_mb": 1378,
+            "cpu_percent": 0
+          },
+          {
+            "pid": 780396,
+            "name": "bash",
+            "memory_mb": 3,
+            "cpu_percent": 0
+          },
+          {
+            "pid": 1479483,
+            "name": "postgres",
+            "memory_mb": 8,
+            "cpu_percent": 0
+          },
+          {
+            "pid": 3607012,
+            "name": "uvicorn",
+            "memory_mb": 135,
+            "cpu_percent": 0
+          }
+        ],
+        "system_load": 0.77392578125
+      },
+      "error": null
+    }
+  ],
+  "generated_at": "2025-10-14T07:33:37.712331"
+}

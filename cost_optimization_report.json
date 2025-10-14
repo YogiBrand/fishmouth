@@ -1,0 +1,57 @@
+{
+  "timestamp": "2025-10-14T07:41:13.589091",
+  "tests": {
+    "enrichment_cost_tracking": {
+      "cost_tracked": true,
+      "cost_amount": 0.0,
+      "sources_used": [
+        "property_estimation",
+        "market_estimation",
+        "openstreetmap_free"
+      ],
+      "fallbacks_triggered": [
+        "census_rate_limited",
+        "google_unavailable",
+        "google_unavailable",
+        "all_satellite_unavailable"
+      ],
+      "processing_time": 2.576723098754883,
+      "free_sources_used": true
+    },
+    "image_processor_free_sources": [
+      {
+        "location": "San Francisco",
+        "error": "HTTP 404"
+      },
+      {
+        "location": "New York",
+        "error": "HTTP 404"
+      },
+      {
+        "location": "Los Angeles",
+        "error": "HTTP 404"
+      }
+    ],
+    "batch_processing_efficiency": {
+      "properties_processed": 5,
+      "total_cost": 0.0,
+      "average_cost_per_property": 0.0,
+      "average_processing_time": 2.987518882751465,
+      "total_processing_time": 14.937594413757324,
+      "cost_effective": true,
+      "fast_processing": true
+    }
+  },
+  "cost_optimization_score": {
+    "total_score": 60,
+    "max_score": 100,
+    "percentage": 60,
+    "grade": "D",
+    "components": {
+      "enrichment_efficiency": 30,
+      "free_source_usage": 0,
+      "batch_processing": 30
+    },
+    "optimization_level": "Needs Improvement"
+  }
+}

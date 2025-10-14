@@ -1,0 +1,138 @@
+name: Fish Mouth
+version: 4.0
+type: web-application
+description: AI-powered roofing intelligence, monetization, and outreach platform combining imagery analysis, automated sequences, AI voice, and a casino-style wallet & rewards system
+
+# Technology Stack
+stack:
+  backend:
+    runtime: Python 3.11
+    framework: FastAPI 0.109+
+    orm: SQLAlchemy 2.0
+    database: PostgreSQL 15 + PostGIS
+    cache: Redis 7
+    task_queue: Celery 5.3
+    validation: Pydantic v2
+    messaging: Redis pub/sub + WebSockets
+    
+  frontend:
+    runtime: React 18
+    styling: TailwindCSS 3 + custom gradients
+    routing: React Router 6
+    state: Context API + localStorage synchronisation
+    visualization: Recharts, Mapbox GL
+    icons: Lucide React
+    build: Webpack (Create React App)
+    
+  ai_ml:
+    llm_primary: Anthropic Claude 3.5 Sonnet
+    llm_fallback: OpenAI GPT-4o (planned)
+    vision: Claude 3.5 Vision + YOLOv8
+    voice_synthesis: ElevenLabs
+    speech_to_text: Deepgram
+    image_processing: OpenCV, Pillow, Real-ESRGAN
+    
+  infrastructure:
+    containerization: Docker + Docker Compose (Kubernetes-ready)
+    orchestration: Celery master orchestrator + reserved microservice ports (8001-8009)
+    object_storage: S3-compatible bucket (uploads/, reports/)
+    ingress: Nginx / API Gateway (planned for prod)
+    monitoring: Sentry, Prometheus, Grafana
+    logging: structlog with request context binding
+
+  external_services:
+    telephony: Telnyx (Voice + SMS)
+    payments: Stripe Checkout & Billing
+    imagery: Mapbox Static, Google Street View
+    property_data: Estated (primary), county records (fallback)
+    contact_data: PeopleDataLabs / Clearbit (fallback to synthetic)
+    direct_mail: Lob (roadmap)
+
+# Project Structure
+structure:
+  backend: /backend/
+  frontend: /frontend/
+  voice_server: /ai-voice-server/  # experimental streaming playground
+  docs: /.speckit/
+  deployment: /docker-compose.yml
+
+# Key Features
+features:
+  - Lead Detection & Scoring Pipeline
+  - Enhanced Roof Intelligence (imagery + anomalies)
+  - AI Voice Calling & Campaigns
+  - Sequence Automation (SMS/Email/Voice)
+  - Wallet & Rewards Gamification
+  - Auto-Spend Credit Routing (per channel)
+  - Daily Quest & Streak Engine
+  - Admin Dashboard & Billing Analytics
+  - Contagion Heatmaps & Clustering
+  - Shareable Report Generation
+  - Real-time Activity Feed
+  - Outreach Orchestrator (WIP)
+
+# Development Status
+status:
+  phase: Phase 2B - Gamified Monetization & AI Ops
+  version: 4.0 (Active Development)
+  production_ready:
+    - Authentication & RBAC
+    - Lead Detection & Scoring
+    - Database Models (23+ models)
+    - API Surface (50+ REST + WS endpoints)
+    - Dashboard & Gamified UX
+    - Wallet & Rewards Modal
+    - Quest Rotation & Streak Tracking
+    - Billing Usage Aggregation
+    - Admin Console & Telemetry
+    - Voice Campaign Launch (non-streaming)
+    - Report Generation & Email Service
+    - Property & Contact Enrichment Pipeline
+  in_development:
+    - Stripe Checkout Sessions & Webhook reconciliation
+    - Voice Agent Real-time Streaming Loop
+    - Outreach Orchestrator service (port 8007)
+    - Auto-distribution Engine (credit allocation sliders)
+    - Kubernetes Deployment Playbooks + Helm charts
+    - Prometheus/Grafana dashboards for new services
+  planned:
+    - Drag-and-drop Sequence Builder UX polish
+    - Claude Vision anomaly reviewer with feedback loop
+    - Paid media integrations (Facebook/Google Ads)
+    - White-label agency reporting portal
+    - Mobile companion app
+    - Partner API & marketplace integrations
+
+# Documentation
+documentation:
+  master_spec: FISHMOUTH_MASTER_SPEC.md
+  readme: README.md
+  architecture: .speckit/architecture/
+  features: .speckit/features/
+  apis: .speckit/apis/
+  components: .speckit/components/  # reserved for UI atoms (future)
+  prompts: .speckit/prompts/
+  deployment: .speckit/deployment/
+  status: .speckit/CURRENT_STATUS.md
+
+# Contacts
+contacts:
+  team: dev@fishmouth.com
+  support: support@fishmouth.com
+  repository: internal (private)
+
+# Business Model
+business:
+  model: Quality-based SaaS with consumption wallet
+  pricing:
+    trial: 25 free leads + 14 days (quest incentives)
+    professional: $299/month + $1.13 per quality lead
+    enterprise: $999/month + $0.90 per quality lead
+  monetization:
+    wallet_markup: 4.0  # wallet → channel credits multiplier
+    quests: weekly streak bonuses, daily wave rotation
+  guarantee: 60-day money-back guarantee (current promo)
+  target_margin: 78-82%
+
+
+

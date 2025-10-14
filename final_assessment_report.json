@@ -1,0 +1,244 @@
+{
+  "assessment_results": {
+    "service_health": {
+      "enrichment": {
+        "status": "healthy",
+        "details": {
+          "status": "healthy",
+          "timestamp": "2025-10-14T07:40:15.113640",
+          "services": {
+            "database": "ok",
+            "redis": "ok",
+            "enrichers": "ok"
+          }
+        },
+        "cost_optimized": false
+      },
+      "image_processor": {
+        "status": "healthy",
+        "details": {
+          "status": "healthy",
+          "service": "cost-optimized-image-processor",
+          "port": 8012,
+          "cost_optimizations": {
+            "free_openstreetmap": true,
+            "local_super_resolution": true,
+            "extended_caching": "7 days",
+            "batch_processing": true
+          },
+          "estimated_cost_savings": "75% vs traditional APIs"
+        },
+        "cost_optimized": true
+      }
+    },
+    "database_analysis": {
+      "total_tables": 29,
+      "table_details": {
+        "ai_configurations": {
+          "columns": 27,
+          "structure": "company_voice_description:text, voice_closing_prompt:text, voice_objection_prompts:json, voice_opening_prompt:text, common_objections:json, value_propositions:json, key_differentiators:json, voice_enabled:boolean, user_id:integer, id:integer, max_call_duration:integer, max_objections:integer, voice_speed:double precision, email_tone:character varying, email_length:character varying, email_personalization:character varying, updated_at:timestamp without time zone, created_at:timestamp without time zone, urgency_level:double precision, ai_formality:double precision, ai_creativity:double precision, sms_generation_prompt:text, sms_tone:character varying, sms_emoji_enabled:boolean, email_generation_prompt:text, voice_tone:character varying, voice_id:character varying"
+        },
+        "area_scans": {
+          "columns": 15,
+          "structure": "id:integer, created_at:timestamp without time zone, error_message:text, results_summary:json, scan_parameters:json, progress_percentage:double precision, scan_type:character varying, area_name:character varying, user_id:integer, processed_properties:integer, total_properties:integer, status:character varying, completed_at:timestamp without time zone, qualified_leads:integer, started_at:timestamp without time zone"
+        },
+        "city_scrape_configs": {
+          "columns": 11,
+          "structure": "updated_at:timestamp without time zone, priority:integer, scrape_frequency:character varying, max_records_per_run:integer, data_sources:ARRAY, parameters:jsonb, enabled:boolean, created_at:timestamp without time zone, id:uuid, city:character varying, state:character varying"
+        },
+        "data_sources": {
+          "columns": 20,
+          "structure": "success_rate:numeric, enabled:boolean, rate_limit_delay:integer, extraction_rules:jsonb, search_parameters:jsonb, password_field:character varying, username_field:character varying, login_url:text, login_required:boolean, detail_endpoint:text, search_endpoint:text, base_url:text, last_scraped_at:timestamp without time zone, created_at:timestamp without time zone, updated_at:timestamp without time zone, id:uuid, name:character varying, source_type:character varying, city:character varying, state:character varying"
+        },
+        "enrichment_jobs": {
+          "columns": 11,
+          "structure": "source_table:character varying, id:uuid, source_id:uuid, enrichment_type:character varying, status:character varying, provider:character varying, cost:numeric, result:jsonb, error_message:text, created_at:timestamp without time zone, completed_at:timestamp without time zone"
+        },
+        "job_schedules": {
+          "columns": 12,
+          "structure": "job_name:character varying, last_run_status:character varying, last_run_at:timestamp without time zone, updated_at:timestamp without time zone, created_at:timestamp without time zone, cities:ARRAY, parameters:jsonb, enabled:boolean, cron_expression:character varying, job_type:character varying, job_id:character varying, last_run_message:text"
+        },
+        "lead_activities": {
+          "columns": 10,
+          "structure": "lead_id:integer, id:integer, activity_type:character varying, title:character varying, description:text, activity_metadata:json, success:boolean, error_message:text, created_at:timestamp without time zone, user_id:integer"
+        },
+        "lead_scores": {
+          "columns": 16,
+          "structure": "roof_age_score:integer, updated_at:timestamp without time zone, created_at:timestamp without time zone, exclusive_territory:character varying, price_per_lead:numeric, pricing_tier:character varying, triggers_detected:jsonb, buying_signals:jsonb, urgency_score:integer, owner_match_score:integer, neighborhood_score:integer, storm_activity_score:integer, property_value_score:integer, overall_score:integer, property_id:uuid, id:uuid"
+        },
+        "leads": {
+          "columns": 42,
+          "structure": "conversion_probability:double precision, created_at:timestamp without time zone, roof_material:character varying, updated_at:timestamp without time zone, aerial_image_url:character varying, tags:json, status:USER-DEFINED, length_of_residence:integer, property_type:character varying, year_built:integer, property_value:integer, contact_enrichment_cost:double precision, contact_enriched:boolean, homeowner_phone:character varying, homeowner_email:character varying, homeowner_name:character varying, contact_enrichment_status:character varying, roof_size_sqft:integer, state:character varying, id:integer, user_id:integer, area_scan_id:integer, address:character varying, city:character varying, property_enrichment_status:character varying, imagery_status:character varying, discovery_status:character varying, roof_condition_score:double precision, roof_age_years:integer, longitude:double precision, latitude:double precision, zip_code:character varying, damage_indicators:json, replacement_urgency:character varying, priority:USER-DEFINED, lead_score:double precision, ai_analysis:json, notes:text, last_contacted:timestamp without time zone, next_follow_up:timestamp without time zone, cost_to_generate:double precision, estimated_value:double precision"
+        },
+        "property_images": {
+          "columns": 19,
+          "structure": "s3_url:text, id:uuid, property_id:uuid, image_type:character varying, view_angle:character varying, original_url:text, s3_key:text, s3_bucket:character varying, capture_date:date, image_width:integer, image_height:integer, file_size_bytes:integer, format:character varying, quality_score:integer, usable_for_analysis:boolean, processed:boolean, processed_at:timestamp without time zone, processing_config:jsonb, created_at:timestamp without time zone"
+        },
+        "raw_contractors": {
+          "columns": 19,
+          "structure": "owner_name:character varying, address:text, city:character varying, state:character varying, zip:character varying, id:uuid, phone:character varying, email:character varying, website:text, license_number:character varying, years_in_business:integer, services:ARRAY, certifications:ARRAY, source_url:text, raw_data:jsonb, processed:boolean, created_at:timestamp without time zone, job_id:uuid, company_name:character varying"
+        },
+        "raw_permits": {
+          "columns": 17,
+          "structure": "created_at:timestamp without time zone, job_id:uuid, permit_number:character varying, address:text, city:character varying, state:character varying, zip:character varying, issue_date:date, permit_type:character varying, work_description:text, contractor_name:character varying, contractor_license:character varying, estimated_value:numeric, source_url:text, raw_data:jsonb, processed:boolean, id:uuid"
+        },
+        "raw_properties": {
+          "columns": 22,
+          "structure": "property_value:numeric, year_built:integer, sqft:integer, lot_size:numeric, beds:integer, baths:numeric, property_type:character varying, source_url:text, raw_data:jsonb, processed:boolean, created_at:timestamp without time zone, owner_zip:character varying, owner_state:character varying, owner_city:character varying, owner_address:text, owner_name:character varying, zip:character varying, state:character varying, city:character varying, address:text, job_id:uuid, id:uuid"
+        },
+        "roof_analysis": {
+          "columns": 33,
+          "structure": "roof_type:character varying, roof_pitch:character varying, roof_sqft:integer, damage_areas_sqft:jsonb, damage_locations:jsonb, damage_severity:jsonb, damage_types:ARRAY, damage_detected:boolean, overall_condition:character varying, property_id:uuid, id:uuid, confidence_score:numeric, created_at:timestamp without time zone, analyzed_at:timestamp without time zone, validation_date:timestamp without time zone, validation_notes:text, human_validator_id:uuid, human_validated:boolean, validation_confidence:numeric, validation_status:character varying, segmentor_version:character varying, segmentor_model:character varying, detector_version:character varying, detector_model:character varying, classifier_version:character varying, classifier_model:character varying, roi_for_replacement:numeric, replacement_cost_high:numeric, replacement_cost_low:numeric, repair_cost_high:numeric, repair_cost_low:numeric, estimated_remaining_life:integer, estimated_age:integer"
+        },
+        "scraping_cache": {
+          "columns": 7,
+          "structure": "id:uuid, url:text, content:text, content_type:character varying, http_status:integer, scraped_at:timestamp without time zone, expires_at:timestamp without time zone"
+        },
+        "scraping_errors": {
+          "columns": 8,
+          "structure": "resolved:boolean, id:uuid, job_id:uuid, url:text, error_type:character varying, error_message:text, retry_count:integer, created_at:timestamp without time zone"
+        },
+        "scraping_jobs": {
+          "columns": 13,
+          "structure": "id:uuid, created_at:timestamp without time zone, metadata:jsonb, error_message:text, records_failed:integer, records_succeeded:integer, records_processed:integer, completed_at:timestamp without time zone, started_at:timestamp without time zone, status:character varying, state:character varying, city:character varying, job_type:character varying"
+        },
+        "sequence_enrollments": {
+          "columns": 20,
+          "structure": "emails_clicked:integer, completed_at:timestamp without time zone, enrolled_at:timestamp without time zone, conversion_date:timestamp without time zone, converted:boolean, id:integer, sequence_id:integer, lead_id:integer, user_id:integer, status:character varying, current_node_id:character varying, steps_completed:integer, next_execution_at:timestamp without time zone, last_execution_at:timestamp without time zone, error_message:text, conversion_outcome:character varying, emails_sent:integer, sms_sent:integer, calls_made:integer, emails_opened:integer"
+        },
+        "sequence_executions": {
+          "columns": 11,
+          "structure": "enrollment_id:integer, sequence_id:integer, id:integer, completed_at:timestamp without time zone, started_at:timestamp without time zone, execution_metadata:json, error_message:text, status:character varying, adapter:character varying, node_type:USER-DEFINED, node_id:character varying"
+        },
+        "sequence_nodes": {
+          "columns": 14,
+          "structure": "sequence_id:integer, node_id:character varying, position_x:double precision, node_type:USER-DEFINED, position_y:double precision, config:json, ai_instructions:text, next_nodes:json, condition_rules:json, execution_count:integer, success_count:integer, failure_count:integer, created_at:timestamp without time zone, id:integer"
+        },
+        "sequences": {
+          "columns": 29,
+          "structure": "working_hours_end:character varying, updated_at:timestamp without time zone, created_at:timestamp without time zone, conversion_rate:double precision, total_converted:integer, total_completed:integer, total_enrolled:integer, timezone:character varying, working_days:json, working_hours_start:character varying, flow_data:json, is_template:boolean, is_active:boolean, description:text, name:character varying, user_id:integer, id:integer, cycle_option:character varying, increment:character varying, maximum_value:character varying, minimum_value:character varying, start_value:character varying, numeric_scale:integer, numeric_precision_radix:integer, numeric_precision:integer, data_type:character varying, sequence_name:name, sequence_schema:name, sequence_catalog:name"
+        },
+        "system_health": {
+          "columns": 9,
+          "structure": "checked_at:timestamp without time zone, last_error:text, error_count:integer, response_time_ms:integer, status:character varying, health_check:character varying, service_name:character varying, metadata:jsonb, id:uuid"
+        },
+        "users": {
+          "columns": 21,
+          "structure": "stripe_subscription_item_id:character varying, stripe_subscription_id:character varying, phone:character varying, company_name:character varying, hashed_password:character varying, email:character varying, id:integer, trial_leads_remaining:integer, role:character varying, is_active:boolean, full_name:character varying, website:character varying, business_address:character varying, subscription_status:character varying, subscription_tier:character varying, service_area:json, business_logo_url:character varying, monthly_lead_count:integer, created_at:timestamp without time zone, updated_at:timestamp without time zone, stripe_customer_id:character varying"
+        },
+        "voice_bookings": {
+          "columns": 14,
+          "structure": "booking_type:character varying, call_id:character varying, window_start:timestamp without time zone, window_end:timestamp without time zone, estimator_id:integer, location:text, notes:text, lead_id:integer, status:character varying, confirmation_sent:boolean, reminder_sent:boolean, created_at:timestamp without time zone, updated_at:timestamp without time zone, id:character varying"
+        },
+        "voice_call_events": {
+          "columns": 5,
+          "structure": "payload:json, event_type:character varying, call_id:character varying, id:integer, created_at:timestamp without time zone"
+        },
+        "voice_call_turns": {
+          "columns": 14,
+          "structure": "audio_url:character varying, created_at:timestamp without time zone, start_ms:integer, text:text, role:character varying, seq:integer, call_id:character varying, id:bigint, barge_in:boolean, end_ms:integer, tool_name:character varying, tokens_in:integer, tokens_out:integer, confidence_score:double precision"
+        },
+        "voice_calls": {
+          "columns": 40,
+          "structure": "silence_periods:json, call_sid:character varying, from_number:character varying, to_number:character varying, direction:character varying, status:character varying, duration_seconds:integer, ai_voice_id:character varying, ai_instructions:text, conversation_goal:character varying, recording_url:character varying, transcript:text, ai_summary:json, outcome:character varying, interest_level:character varying, objections_raised:json, next_steps:text, appointment_scheduled:boolean, appointment_datetime:timestamp without time zone, appointment_type:character varying, call_cost:double precision, ai_cost:double precision, total_cost:double precision, initiated_at:timestamp without time zone, started_at:timestamp without time zone, ended_at:timestamp without time zone, asr_model:character varying, tts_model:character varying, llm_model:character varying, first_audio_latency_ms:integer, p95_latency_ms:integer, transcript_json:json, barge_in_count:integer, tool_calls_made:integer, conversation_state:character varying, confidence_scores:json, sequence_enrollment_id:integer, id:character varying, user_id:integer, lead_id:integer"
+        },
+        "voice_configurations": {
+          "columns": 25,
+          "structure": "voice_style:character varying, silence_timeout_seconds:integer, max_tokens:integer, system_prompt_template:text, updated_at:timestamp without time zone, created_at:timestamp without time zone, jurisdiction:character varying, dnc_compliance:boolean, enable_recording:boolean, enable_barge_in:boolean, require_consent:boolean, llm_model:character varying, llm_vendor:character varying, id:integer, user_id:integer, default_voice_id:character varying, tts_vendor:character varying, temperature:double precision, max_call_duration_minutes:integer, confidence_threshold:double precision, enable_punctuation:boolean, asr_language:character varying, asr_vendor:character varying, pitch_adjustment:double precision, speaking_rate:double precision"
+        },
+        "voice_metrics_daily": {
+          "columns": 20,
+          "structure": "first_minute_latency_ms:integer, bookings:integer, avg_duration_s:integer, connects:integer, calls:integer, user_id:integer, day:date, avg_first_audio_latency_ms:integer, p95_latency_ms:integer, asr_wer:double precision, avg_confidence_score:double precision, barge_in_rate:double precision, outcome_scheduled:integer, outcome_callback:integer, outcome_no_answer:integer, outcome_opt_out:integer, outcome_failed:integer, created_at:timestamp without time zone, updated_at:timestamp without time zone, booking_rate:double precision"
+        }
+      },
+      "pipeline_tables_exist": {
+        "raw_properties": true,
+        "raw_permits": true,
+        "enrichment_jobs": true,
+        "processed_leads": false
+      },
+      "schema_complete": true
+    },
+    "cost_optimization": {
+      "image_processor": {
+        "cost_optimized": true,
+        "free_openstreetmap": true,
+        "local_processing": true,
+        "extended_caching": "7 days",
+        "batch_processing": true
+      }
+    },
+    "data_flow": {
+      "property_enrichment": {
+        "status": "success",
+        "data_enriched": true,
+        "cost_tracked": true,
+        "processing_time": 1.928032398223877
+      },
+      "image_processing": {
+        "status": "failed",
+        "status_code": 404
+      }
+    },
+    "performance": {
+      "cpu_usage": 1.3,
+      "memory_usage": 5.2,
+      "memory_available_gb": 716.4703140258789,
+      "disk_usage": 97.3,
+      "load_average": 2.22412109375,
+      "containers": [
+        {
+          "service": "unknown",
+          "memory_mb": 3,
+          "cpu_percent": 0
+        },
+        {
+          "service": "unknown",
+          "memory_mb": 43,
+          "cpu_percent": 0
+        },
+        {
+          "service": "unknown",
+          "memory_mb": 1404,
+          "cpu_percent": 0
+        },
+        {
+          "service": "unknown",
+          "memory_mb": 3,
+          "cpu_percent": 0
+        },
+        {
+          "service": "database",
+          "memory_mb": 8,
+          "cpu_percent": 0
+        },
+        {
+          "service": "unknown",
+          "memory_mb": 135,
+          "cpu_percent": 0
+        }
+      ],
+      "total_container_memory_mb": 1596
+    }
+  },
+  "pipeline_score": {
+    "total_score": 90,
+    "max_score": 100,
+    "percentage": 90,
+    "grade": "A",
+    "components": {
+      "service_availability": 25,
+      "database_readiness": 20,
+      "cost_optimization": 25,
+      "data_flow_functionality": 10,
+      "performance_efficiency": 10
+    },
+    "readiness_level": "Production Ready"
+  },
+  "recommendations": [
+    "\ud83d\ude80 CRITICAL: Start missing microservices (Scraper, ML Inference, Lead Generator, Orchestrator)",
+    "\ud83d\uddc4\ufe0f DATABASE: Create missing pipeline tables: processed_leads",
+    "\ud83d\udd04 PIPELINE: Fix data flow issues in: image_processing"
+  ],
+  "generated_at": "2025-10-14T07:40:18.783639"
+}

@@ -1,0 +1,56 @@
+# --- General ---
+.DS_Store
+Thumbs.db
+*.swp
+.idea/
+.vscode/
+.cursor/
+
+# --- Node / Frontend ---
+node_modules/
+frontend/node_modules/
+frontend/.next/
+frontend/.nuxt/
+frontend/dist/
+frontend/build/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+frontend/.env
+frontend/.env.*
+
+# --- Python / Backend ---
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.so
+.pytest_cache/
+.mypy_cache/
+.tox/
+.coverage*
+htmlcov/
+dist/
+build/
+.venv/
+venv/
+ENV/
+env/
+backend/.env
+
+# --- Uploads & Generated Assets ---
+uploads/*
+!uploads/.gitkeep
+backend/uploads/*
+!backend/uploads/.gitkeep
+public/uploads/*
+static/generated/*
+coverage/
+.cache/
+.vercel/
+.playwright/
+tmp/
+
+

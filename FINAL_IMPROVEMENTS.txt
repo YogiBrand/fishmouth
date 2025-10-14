@@ -1,0 +1,5 @@
+Making final improvements:
+1. Smooth transition from video to dashboard (gradient fade)
+2. Dashboard looks like real app UI (not "interactive demo" label)
+3. Cycling overlays on aerial image (1-2 at a time, showcasing AI thinking)
+4. Ensure AI Call Strategy button works and shows approaches clearly

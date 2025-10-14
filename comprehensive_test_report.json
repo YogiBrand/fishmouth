@@ -1,0 +1,251 @@
+{
+  "executive_summary": {
+    "total_tests": 8,
+    "passed": 7,
+    "failed": 1,
+    "skipped": 0,
+    "success_rate": 87.5,
+    "total_duration": 8.582356452941895,
+    "services_available": 2,
+    "services_tested": [
+      "enrichment",
+      "image_processor"
+    ]
+  },
+  "detailed_results": [
+    {
+      "test_name": "Enrichment Service Health Check",
+      "status": "PASS",
+      "duration": 0.002415895462036133,
+      "details": {
+        "status_code": 200,
+        "response": {
+          "status": "healthy",
+          "timestamp": "2025-10-14T07:35:55.050988",
+          "services": {
+            "database": "ok",
+            "redis": "ok",
+            "enrichers": "ok"
+          }
+        },
+        "service_port": 8004,
+        "service_healthy": true
+      },
+      "error": null
+    },
+    {
+      "test_name": "Image Processor Health Check",
+      "status": "PASS",
+      "duration": 0.0012660026550292969,
+      "details": {
+        "status_code": 200,
+        "response": {
+          "status": "healthy",
+          "service": "cost-optimized-image-processor",
+          "port": 8012,
+          "cost_optimizations": {
+            "free_openstreetmap": true,
+            "local_super_resolution": true,
+            "extended_caching": "7 days",
+            "batch_processing": true
+          },
+          "estimated_cost_savings": "75% vs traditional APIs"
+        },
+        "service_port": 8012,
+        "service_healthy": true
+      },
+      "error": null
+    },
+    {
+      "test_name": "Database Integration & Schema Analysis",
+      "status": "PASS",
+      "duration": 0.05247831344604492,
+      "details": {
+        "postgres_version": [
+          "PostgreSQL",
+          "15.14"
+        ],
+        "total_tables": 29,
+        "tables_with_columns": {
+          "ai_configurations": 27,
+          "area_scans": 15,
+          "city_scrape_configs": 11,
+          "data_sources": 20,
+          "enrichment_jobs": 11,
+          "job_schedules": 12,
+          "lead_activities": 10,
+          "lead_scores": 16,
+          "leads": 42,
+          "property_images": 19,
+          "raw_contractors": 19,
+          "raw_permits": 17,
+          "raw_properties": 22,
+          "roof_analysis": 33,
+          "scraping_cache": 7,
+          "scraping_errors": 8,
+          "scraping_jobs": 13,
+          "sequence_enrollments": 20,
+          "sequence_executions": 11,
+          "sequence_nodes": 14,
+          "sequences": 17,
+          "system_health": 9,
+          "users": 21,
+          "voice_bookings": 14,
+          "voice_call_events": 5,
+          "voice_call_turns": 14,
+          "voice_calls": 40,
+          "voice_configurations": 25,
+          "voice_metrics_daily": 20
+        },
+        "sample_data_counts": {
+          "raw_properties": 0,
+          "raw_permits": 0,
+          "enrichment_jobs": 0
+        },
+        "pipeline_tables_exist": true
+      },
+      "error": null
+    },
+    {
+      "test_name": "Redis Integration & Caching Test",
+      "status": "PASS",
+      "duration": 0.004767417907714844,
+      "details": {
+        "redis_version": "7.4.6",
+        "used_memory": "1.11M",
+        "connected_clients": 2,
+        "test_operation": "Success",
+        "pipeline_keys_found": 0,
+        "sample_pipeline_keys": []
+      },
+      "error": null
+    },
+    {
+      "test_name": "Enrichment Service Endpoints Test",
+      "status": "PASS",
+      "duration": 4.962106943130493,
+      "details": {
+        "endpoints_tested": [
+          "property_enrichment",
+          "address_validation"
+        ],
+        "successful_endpoints": 2,
+        "results": {
+          "property_enrichment": {
+            "status": "success",
+            "has_enriched_data": true,
+            "cost_tracked": true,
+            "sources_used": [
+              "risk_assessment_algorithm",
+              "openstreetmap_free",
+              "property_estimation",
+              "market_estimation",
+              "estimated"
+            ]
+          },
+          "address_validation": {
+            "status": "success",
+            "validated": true,
+            "cost_tracked": true
+          }
+        }
+      },
+      "error": null
+    },
+    {
+      "test_name": "Image Processor Cost Optimization Test",
+      "status": "FAIL",
+      "duration": 0.011534690856933594,
+      "details": {
+        "endpoints_tested": 4,
+        "successful_endpoints": 0,
+        "results": {
+          "/cost-optimization-status": {
+            "status": "not_found",
+            "status_code": 404
+          },
+          "/status": {
+            "status": "not_found",
+            "status_code": 404
+          },
+          "/config": {
+            "status": "not_found",
+            "status_code": 404
+          },
+          "/info": {
+            "status": "not_found",
+            "status_code": 404
+          },
+          "location_processing": {
+            "status": "failed",
+            "status_code": 404
+          }
+        },
+        "cost_optimization_detected": false
+      },
+      "error": null
+    },
+    {
+      "test_name": "Data Pipeline Flow Test",
+      "status": "PASS",
+      "duration": 2.341080665588379,
+      "details": {
+        "total_stages": 1,
+        "successful_stages": 1,
+        "pipeline_stages": [
+          {
+            "stage": "enrichment",
+            "status": "success",
+            "data_enriched": true
+          }
+        ],
+        "data_flow_working": true
+      },
+      "error": null
+    },
+    {
+      "test_name": "System Performance Analysis",
+      "status": "PASS",
+      "duration": 1.2067065238952637,
+      "details": {
+        "system_metrics": {
+          "cpu_usage_percent": 1.9,
+          "memory_usage_percent": 5.2,
+          "memory_available_gb": 716,
+          "disk_usage_percent": 97.2,
+          "disk_free_gb": 6
+        },
+        "container_metrics": {
+          "unknown": {
+            "pid": 3607012,
+            "memory_mb": 135,
+            "cpu_percent": 0
+          },
+          "postgres": {
+            "pid": 1479483,
+            "memory_mb": 8,
+            "cpu_percent": 0
+          }
+        },
+        "performance_assessment": {
+          "total_containers": 2,
+          "total_memory_used_mb": 143,
+          "efficiency_score": 98.1,
+          "performance_level": "Excellent"
+        }
+      },
+      "error": null
+    }
+  ],
+  "cost_optimization_assessment": {
+    "image_processor_optimized": false,
+    "free_sources_detected": true
+  },
+  "pipeline_readiness": {
+    "database_ready": true,
+    "redis_ready": true,
+    "services_operational": true,
+    "data_flow_tested": true
+  },
+  "generated_at": "2025-10-14T07:36:03.633961"
+}

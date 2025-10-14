@@ -1,0 +1,1058 @@
+// Mock lead data for development and testing
+export const mockLeads = [
+  {
+    id: 1,
+    first_name: 'Sarah',
+    last_name: 'Johnson',
+    email: 'sarah.johnson@email.com',
+    phone: '(555) 123-4567',
+    address: '123 Oak Street',
+    city: 'Austin',
+    state: 'TX',
+    zip_code: '78701',
+    property_value: 485000,
+    roof_age: 15,
+    roof_material: 'Asphalt Shingles',
+    roof_condition: 'Fair',
+    square_footage: 2400,
+    lead_score: 92,
+    status: 'hot',
+    income_bracket: 'High',
+    contact_preference: 'phone',
+    best_time_to_call: 'evening',
+    created_at: '2024-01-15T10:30:00Z',
+    last_contacted: '2024-01-20T14:22:00Z',
+    notes: 'Hail damage visible, interested in full replacement',
+    scan_id: 'scan_001',
+    source: 'Area Scan - Central Austin',
+    activities: [
+      { type: 'scan_lead_created', date: '2024-01-15T10:30:00Z', description: 'Lead discovered via area scan' },
+      { type: 'voice_call', date: '2024-01-20T14:22:00Z', description: 'AI agent call - interested, requested quote' },
+      { type: 'email_sent', date: '2024-01-21T09:15:00Z', description: 'Quote and company info sent' }
+    ],
+    homeowner_name: 'Sarah Johnson',
+    aerial_image_url: 'https://images.fishmouth.ai/demo/normalized-1.jpg',
+    damage_indicators: ['hail_damage', 'dark_streaks', 'granule_loss'],
+    replacement_urgency: 'urgent',
+    image_quality_score: 84,
+    image_quality_issues: ['soft_shadows'],
+    quality_validation_status: 'passed',
+    street_view_quality: {
+      angles_captured: 3,
+      average_quality: 0.86,
+      average_occlusion: 0.17,
+      headings: [32, 164, 278],
+    },
+    street_view_gallery: [
+      {
+        heading: 32,
+        public_url: 'https://images.fishmouth.ai/demo/street-1-0.jpg',
+        quality_score: 0.86,
+        occlusion_score: 0.18,
+        anomalies: [
+          {
+            type: 'street_view_dark_streaks',
+            probability: 0.78,
+            severity: 0.52,
+            description: 'Dark streaking along the north slope from curbside view.',
+          },
+        ],
+      },
+      {
+        heading: 164,
+        public_url: 'https://images.fishmouth.ai/demo/street-1-1.jpg',
+        quality_score: 0.81,
+        occlusion_score: 0.24,
+        anomalies: [],
+      },
+      {
+        heading: 278,
+        public_url: 'https://images.fishmouth.ai/demo/street-1-2.jpg',
+        quality_score: 0.79,
+        occlusion_score: 0.21,
+        anomalies: [],
+      },
+    ],
+    roof_intelligence: {
+      imagery: {
+        public_url: 'https://images.fishmouth.ai/demo/satellite-1.jpg',
+        source: 'mapbox',
+        captured_at: '2024-01-14T18:25:00Z',
+      },
+      roof_view: {
+        image_url: 'https://images.fishmouth.ai/demo/normalized-1.jpg',
+        mask_url: 'https://images.fishmouth.ai/demo/mask-1.png',
+        coverage_ratio: 0.81,
+      },
+      heatmap: {
+        url: 'https://images.fishmouth.ai/demo/heatmap-1.png',
+        legend: {
+          hail_damage: '#ff7f0e',
+          dark_streaks: '#1f77b4',
+          granule_loss: '#2ca02c',
+        },
+      },
+      analysis: {
+        summary: 'Thermal anomalies and discoloration patterns indicate hail impact on north-east slopes.',
+        condition_score: 62,
+        replacement_urgency: 'urgent',
+        damage_indicators: ['hail_damage', 'dark_streaks'],
+        confidence: 0.88,
+      },
+      anomalies: [
+        {
+          type: 'hail_damage',
+          severity: 0.74,
+          probability: 0.92,
+          description: 'Clustered hail damage on northern slope (~240 sqft).',
+        },
+        {
+          type: 'granule_loss',
+          severity: 0.58,
+          probability: 0.81,
+          description: 'Granules washed away near downspouts indicating water flow issues.',
+        },
+      ],
+      street_view: [
+        {
+          heading: 32,
+          public_url: 'https://images.fishmouth.ai/demo/street-1-0.jpg',
+          quality_score: 0.86,
+          occlusion_score: 0.18,
+          anomalies: [
+            {
+              type: 'curbside_discoloration',
+              probability: 0.76,
+              severity: 0.48,
+            },
+          ],
+        },
+      ],
+    },
+    ai_insights: {
+      deal_probability: 85,
+      urgency_score: 78,
+      budget_fit: 'High',
+      decision_timeline: '2-4 weeks',
+      key_motivators: ['Storm damage', 'Insurance claim', 'Home value'],
+      potential_objections: ['Price', 'Timeline'],
+      recommended_approach: 'Lead with insurance expertise and storm damage specialization'
+    }
+  },
+  {
+    id: 2,
+    first_name: 'Michael',
+    last_name: 'Chen',
+    email: 'mchen.home@gmail.com',
+    phone: '(555) 987-6543',
+    address: '456 Pine Avenue',
+    city: 'Austin',
+    state: 'TX',
+    zip_code: '78702',
+    property_value: 620000,
+    roof_age: 22,
+    roof_material: 'Clay Tile',
+    roof_condition: 'Poor',
+    square_footage: 3200,
+    lead_score: 88,
+    status: 'hot',
+    income_bracket: 'High',
+    contact_preference: 'email',
+    best_time_to_call: 'morning',
+    created_at: '2024-01-18T09:45:00Z',
+    last_contacted: null,
+    notes: 'Multiple missing tiles, leak concerns mentioned',
+    scan_id: 'scan_002',
+    source: 'Area Scan - East Austin',
+    activities: [
+      { type: 'scan_lead_created', date: '2024-01-18T09:45:00Z', description: 'Lead discovered via area scan' }
+    ],
+    homeowner_name: 'Michael Chen',
+    aerial_image_url: 'https://images.fishmouth.ai/demo/normalized-2.jpg',
+    damage_indicators: ['tile_cracking', 'leak_pathways', 'ridge_caps_missing'],
+    replacement_urgency: 'immediate',
+    image_quality_score: 76,
+    image_quality_issues: ['cloud_cover'],
+    quality_validation_status: 'review',
+    street_view_quality: {
+      angles_captured: 2,
+      average_quality: 0.79,
+      average_occlusion: 0.27,
+      headings: [18, 182],
+    },
+    street_view_gallery: [
+      {
+        heading: 18,
+        public_url: 'https://images.fishmouth.ai/demo/street-2-0.jpg',
+        quality_score: 0.8,
+        occlusion_score: 0.25,
+        anomalies: [
+          {
+            type: 'street_view_tile_slippage',
+            probability: 0.73,
+            severity: 0.61,
+            description: 'Visible tile displacement on front-facing dormer.',
+          },
+        ],
+      },
+      {
+        heading: 182,
+        public_url: 'https://images.fishmouth.ai/demo/street-2-1.jpg',
+        quality_score: 0.78,
+        occlusion_score: 0.29,
+        anomalies: [],
+      },
+    ],
+    roof_intelligence: {
+      imagery: {
+        public_url: 'https://images.fishmouth.ai/demo/satellite-2.jpg',
+        source: 'mapbox',
+        captured_at: '2024-01-17T13:12:00Z',
+      },
+      roof_view: {
+        image_url: 'https://images.fishmouth.ai/demo/normalized-2.jpg',
+        mask_url: 'https://images.fishmouth.ai/demo/mask-2.png',
+        coverage_ratio: 0.77,
+      },
+      heatmap: {
+        url: 'https://images.fishmouth.ai/demo/heatmap-2.png',
+        legend: {
+          tile_cracking: '#ff7f0e',
+          leak_pathways: '#d62728',
+        },
+      },
+      analysis: {
+        summary: 'Clay tiles show multi-axis cracking and ridge cap displacement consistent with hail.',
+        condition_score: 54,
+        replacement_urgency: 'immediate',
+        damage_indicators: ['tile_cracking', 'leak_pathways'],
+        confidence: 0.9,
+      },
+      anomalies: [
+        {
+          type: 'tile_cracking',
+          severity: 0.82,
+          probability: 0.94,
+          description: 'Cracked clay tiles along ridgeline and valley intersections.',
+        },
+        {
+          type: 'leak_pathways',
+          severity: 0.67,
+          probability: 0.89,
+          description: 'Water intrusion vectors near skylight flashing.',
+        },
+      ],
+      street_view: [
+        {
+          heading: 18,
+          public_url: 'https://images.fishmouth.ai/demo/street-2-0.jpg',
+          quality_score: 0.8,
+          occlusion_score: 0.25,
+          anomalies: [
+            {
+              type: 'tile_displacement',
+              probability: 0.74,
+              severity: 0.58,
+            },
+          ],
+        },
+      ],
+    },
+    ai_insights: {
+      deal_probability: 90,
+      urgency_score: 85,
+      budget_fit: 'High',
+      decision_timeline: '1-2 weeks',
+      key_motivators: ['Leak prevention', 'Property protection', 'Age of roof'],
+      potential_objections: ['Timeline disruption'],
+      recommended_approach: 'Emphasize urgent need and quick installation capability'
+    }
+  },
+  {
+    id: 3,
+    first_name: 'Jennifer',
+    last_name: 'Rodriguez',
+    email: 'jen.rodriguez@outlook.com',
+    phone: '(555) 456-7890',
+    address: '789 Maple Drive',
+    city: 'Austin',
+    state: 'TX',
+    zip_code: '78704',
+    property_value: 395000,
+    roof_age: 18,
+    roof_material: 'Asphalt Shingles',
+    roof_condition: 'Fair',
+    square_footage: 1900,
+    lead_score: 79,
+    status: 'warm',
+    income_bracket: 'Medium-High',
+    contact_preference: 'phone',
+    best_time_to_call: 'afternoon',
+    created_at: '2024-01-19T16:20:00Z',
+    last_contacted: '2024-01-22T11:30:00Z',
+    notes: 'Interested in metal roofing options, price-conscious',
+    scan_id: 'scan_003',
+    source: 'Area Scan - South Austin',
+    activities: [
+      { type: 'scan_lead_created', date: '2024-01-19T16:20:00Z', description: 'Lead discovered via area scan' },
+      { type: 'voice_call', date: '2024-01-22T11:30:00Z', description: 'Initial contact - interested but comparing options' },
+      { type: 'email_sent', date: '2024-01-22T14:45:00Z', description: 'Metal roofing information and financing options sent' }
+    ],
+    homeowner_name: 'Jennifer Rodriguez',
+    aerial_image_url: 'https://images.fishmouth.ai/demo/normalized-3.jpg',
+    damage_indicators: ['aging_wear', 'moss_growth'],
+    replacement_urgency: 'plan_ahead',
+    image_quality_score: 71,
+    image_quality_issues: [],
+    quality_validation_status: 'passed',
+    street_view_quality: {
+      angles_captured: 2,
+      average_quality: 0.83,
+      average_occlusion: 0.19,
+      headings: [45, 210],
+    },
+    street_view_gallery: [
+      {
+        heading: 45,
+        public_url: 'https://images.fishmouth.ai/demo/street-3-0.jpg',
+        quality_score: 0.84,
+        occlusion_score: 0.19,
+        anomalies: [],
+      },
+      {
+        heading: 210,
+        public_url: 'https://images.fishmouth.ai/demo/street-3-1.jpg',
+        quality_score: 0.82,
+        occlusion_score: 0.21,
+        anomalies: [
+          {
+            type: 'moss_growth',
+            probability: 0.63,
+            severity: 0.42,
+            description: 'Moss accumulation on rear shaded slope.',
+          },
+        ],
+      },
+    ],
+    roof_intelligence: {
+      imagery: {
+        public_url: 'https://images.fishmouth.ai/demo/satellite-3.jpg',
+        source: 'mapbox',
+        captured_at: '2024-01-18T07:50:00Z',
+      },
+      roof_view: {
+        image_url: 'https://images.fishmouth.ai/demo/normalized-3.jpg',
+        mask_url: 'https://images.fishmouth.ai/demo/mask-3.png',
+        coverage_ratio: 0.79,
+      },
+      heatmap: {
+        url: 'https://images.fishmouth.ai/demo/heatmap-3.png',
+        legend: {
+          aging_wear: '#1f77b4',
+          moss_growth: '#2ca02c',
+        },
+      },
+      analysis: {
+        summary: 'Wear patterns consistent with 18-year asphalt shingles; moss present on shaded slopes.',
+        condition_score: 63,
+        replacement_urgency: 'plan_ahead',
+        damage_indicators: ['aging_wear', 'moss_growth'],
+        confidence: 0.81,
+      },
+      anomalies: [
+        {
+          type: 'aging_wear',
+          severity: 0.46,
+          probability: 0.73,
+          description: 'Uniform granule loss detected across south-facing slopes.',
+        },
+        {
+          type: 'moss_growth',
+          severity: 0.38,
+          probability: 0.68,
+          description: 'Moss activity near dormers and gutter edges.',
+        },
+      ],
+      street_view: [
+        {
+          heading: 210,
+          public_url: 'https://images.fishmouth.ai/demo/street-3-1.jpg',
+          quality_score: 0.82,
+          occlusion_score: 0.21,
+          anomalies: [
+            {
+              type: 'moss_growth',
+              probability: 0.63,
+              severity: 0.42,
+            },
+          ],
+        },
+      ],
+    },
+    ai_insights: {
+      deal_probability: 72,
+      urgency_score: 60,
+      budget_fit: 'Medium',
+      decision_timeline: '4-8 weeks',
+      key_motivators: ['Energy efficiency', 'Long-term value', 'Durability'],
+      potential_objections: ['Initial cost', 'Material choice'],
+      recommended_approach: 'Focus on long-term savings and financing options'
+    }
+  },
+  {
+    id: 4,
+    first_name: 'David',
+    last_name: 'Thompson',
+    email: 'dthompson.contractor@yahoo.com',
+    phone: '(555) 234-5678',
+    address: '321 Cedar Lane',
+    city: 'Round Rock',
+    state: 'TX',
+    zip_code: '78664',
+    property_value: 540000,
+    roof_age: 12,
+    roof_material: 'Composite Shingles',
+    roof_condition: 'Good',
+    square_footage: 2800,
+    lead_score: 95,
+    status: 'hot',
+    income_bracket: 'High',
+    contact_preference: 'phone',
+    best_time_to_call: 'evening',
+    created_at: '2024-01-20T08:15:00Z',
+    last_contacted: '2024-01-23T17:45:00Z',
+    notes: 'Professional contractor, values quality work, ready to move quickly',
+    scan_id: 'scan_004',
+    source: 'Area Scan - Round Rock',
+    activities: [
+      { type: 'scan_lead_created', date: '2024-01-20T08:15:00Z', description: 'Lead discovered via area scan' },
+      { type: 'voice_call', date: '2024-01-23T17:45:00Z', description: 'Excellent conversation - wants premium materials and quick start' },
+      { type: 'sequence_enrolled', date: '2024-01-23T18:00:00Z', description: 'Added to premium client sequence' }
+    ],
+    homeowner_name: 'David Thompson',
+    aerial_image_url: 'https://images.fishmouth.ai/demo/normalized-4.jpg',
+    damage_indicators: ['hail_damage', 'ridge_cap_shift'],
+    replacement_urgency: 'urgent',
+    image_quality_score: 88,
+    image_quality_issues: [],
+    quality_validation_status: 'passed',
+    street_view_quality: {
+      angles_captured: 3,
+      average_quality: 0.9,
+      average_occlusion: 0.12,
+      headings: [0, 150, 300],
+    },
+    street_view_gallery: [
+      {
+        heading: 0,
+        public_url: 'https://images.fishmouth.ai/demo/street-4-0.jpg',
+        quality_score: 0.9,
+        occlusion_score: 0.11,
+        anomalies: [],
+      },
+      {
+        heading: 150,
+        public_url: 'https://images.fishmouth.ai/demo/street-4-1.jpg',
+        quality_score: 0.88,
+        occlusion_score: 0.13,
+        anomalies: [
+          {
+            type: 'ridge_cap_shift',
+            probability: 0.69,
+            severity: 0.44,
+            description: 'Ridge cap displacement visible from southeast approach.',
+          },
+        ],
+      },
+    ],
+    roof_intelligence: {
+      imagery: {
+        public_url: 'https://images.fishmouth.ai/demo/satellite-4.jpg',
+        source: 'mapbox',
+        captured_at: '2024-01-19T10:05:00Z',
+      },
+      roof_view: {
+        image_url: 'https://images.fishmouth.ai/demo/normalized-4.jpg',
+        mask_url: 'https://images.fishmouth.ai/demo/mask-4.png',
+        coverage_ratio: 0.84,
+      },
+      heatmap: {
+        url: 'https://images.fishmouth.ai/demo/heatmap-4.png',
+        legend: {
+          hail_damage: '#ff7f0e',
+          ridge_cap_shift: '#9467bd',
+        },
+      },
+      analysis: {
+        summary: 'Premium composite shingles exhibit hail bruising along western slope. Minimal granule displacement.',
+        condition_score: 74,
+        replacement_urgency: 'urgent',
+        damage_indicators: ['hail_damage', 'ridge_cap_shift'],
+        confidence: 0.87,
+      },
+      anomalies: [
+        {
+          type: 'hail_damage',
+          severity: 0.66,
+          probability: 0.9,
+          description: 'Impact signatures concentrated on western exposure.',
+        },
+      ],
+      street_view: [
+        {
+          heading: 150,
+          public_url: 'https://images.fishmouth.ai/demo/street-4-1.jpg',
+          quality_score: 0.88,
+          occlusion_score: 0.13,
+          anomalies: [
+            {
+              type: 'ridge_cap_shift',
+              probability: 0.69,
+              severity: 0.44,
+            },
+          ],
+        },
+      ],
+    },
+    ai_insights: {
+      deal_probability: 95,
+      urgency_score: 90,
+      budget_fit: 'High',
+      decision_timeline: '1 week',
+      key_motivators: ['Quality workmanship', 'Professional reputation', 'Quick turnaround'],
+      potential_objections: ['Scheduling conflicts'],
+      recommended_approach: 'Highlight premium materials and expedited service'
+    }
+  },
+  {
+    id: 5,
+    first_name: 'Lisa',
+    last_name: 'Martinez',
+    email: 'lisa.martinez@company.com',
+    phone: '(555) 345-6789',
+    address: '654 Birch Street',
+    city: 'Cedar Park',
+    state: 'TX',
+    zip_code: '78613',
+    property_value: 425000,
+    roof_age: 20,
+    roof_material: 'Asphalt Shingles',
+    roof_condition: 'Fair',
+    square_footage: 2200,
+    lead_score: 83,
+    status: 'warm',
+    income_bracket: 'Medium-High',
+    contact_preference: 'email',
+    best_time_to_call: 'morning',
+    created_at: '2024-01-21T12:30:00Z',
+    last_contacted: null,
+    notes: 'Recent hail storm in area, insurance adjuster scheduled',
+    scan_id: 'scan_005',
+    source: 'Area Scan - Cedar Park',
+    activities: [
+      { type: 'scan_lead_created', date: '2024-01-21T12:30:00Z', description: 'Lead discovered via area scan' }
+    ],
+    homeowner_name: 'Lisa Martinez',
+    aerial_image_url: 'https://images.fishmouth.ai/demo/normalized-5.jpg',
+    damage_indicators: ['granule_loss', 'soft_spots'],
+    replacement_urgency: 'urgent',
+    image_quality_score: 75,
+    image_quality_issues: ['light_glare'],
+    quality_validation_status: 'review',
+    street_view_quality: {
+      angles_captured: 2,
+      average_quality: 0.8,
+      average_occlusion: 0.23,
+      headings: [60, 240],
+    },
+    street_view_gallery: [
+      {
+        heading: 60,
+        public_url: 'https://images.fishmouth.ai/demo/street-5-0.jpg',
+        quality_score: 0.8,
+        occlusion_score: 0.2,
+        anomalies: [],
+      },
+      {
+        heading: 240,
+        public_url: 'https://images.fishmouth.ai/demo/street-5-1.jpg',
+        quality_score: 0.79,
+        occlusion_score: 0.26,
+        anomalies: [],
+      },
+    ],
+    roof_intelligence: {
+      imagery: {
+        public_url: 'https://images.fishmouth.ai/demo/satellite-5.jpg',
+        source: 'mapbox',
+        captured_at: '2024-01-21T11:10:00Z',
+      },
+      roof_view: {
+        image_url: 'https://images.fishmouth.ai/demo/normalized-5.jpg',
+        mask_url: 'https://images.fishmouth.ai/demo/mask-5.png',
+        coverage_ratio: 0.72,
+      },
+      heatmap: {
+        url: 'https://images.fishmouth.ai/demo/heatmap-5.png',
+        legend: {
+          granule_loss: '#ff7f0e',
+          soft_spots: '#17becf',
+        },
+      },
+      analysis: {
+        summary: 'Granule loss concentrated along eaves; potential decking soft spots detected.',
+        condition_score: 58,
+        replacement_urgency: 'urgent',
+        damage_indicators: ['granule_loss', 'soft_spots'],
+        confidence: 0.79,
+      },
+      anomalies: [
+        {
+          type: 'granule_loss',
+          severity: 0.52,
+          probability: 0.82,
+          description: 'Granule depletion along eastern gutter line.',
+        },
+      ],
+      street_view: [],
+    },
+    ai_insights: {
+      deal_probability: 78,
+      urgency_score: 70,
+      budget_fit: 'High',
+      decision_timeline: '2-3 weeks',
+      key_motivators: ['Insurance coverage', 'Storm damage', 'Professional service'],
+      potential_objections: ['Insurance approval process'],
+      recommended_approach: 'Lead with insurance claim expertise and fast approval process'
+    }
+  },
+  {
+    id: 6,
+    first_name: 'Robert',
+    last_name: 'Wilson',
+    email: 'rob.wilson.home@gmail.com',
+    phone: '(555) 567-8901',
+    address: '987 Elm Court',
+    city: 'Pflugerville',
+    state: 'TX',
+    zip_code: '78660',
+    property_value: 368000,
+    roof_age: 16,
+    roof_material: 'Asphalt Shingles',
+    roof_condition: 'Fair',
+    square_footage: 2100,
+    lead_score: 76,
+    status: 'warm',
+    income_bracket: 'Medium',
+    contact_preference: 'phone',
+    best_time_to_call: 'evening',
+    created_at: '2024-01-22T14:45:00Z',
+    last_contacted: '2024-01-24T19:30:00Z',
+    notes: 'Budget-conscious, interested in financing options',
+    scan_id: 'scan_006',
+    source: 'Area Scan - Pflugerville',
+    activities: [
+      { type: 'scan_lead_created', date: '2024-01-22T14:45:00Z', description: 'Lead discovered via area scan' },
+      { type: 'voice_call', date: '2024-01-24T19:30:00Z', description: 'Discussed financing options and timeline' }
+    ],
+    homeowner_name: 'Robert Wilson',
+    aerial_image_url: 'https://images.fishmouth.ai/demo/normalized-6.jpg',
+    damage_indicators: ['granule_loss', 'dark_streaks'],
+    replacement_urgency: 'plan_ahead',
+    image_quality_score: 69,
+    quality_validation_status: 'review',
+    ai_insights: {
+      deal_probability: 68,
+      urgency_score: 55,
+      budget_fit: 'Medium',
+      decision_timeline: '6-12 weeks',
+      key_motivators: ['Affordable financing', 'Value for money', 'Reliable service'],
+      potential_objections: ['Monthly payment amount', 'Credit approval'],
+      recommended_approach: 'Emphasize flexible financing and payment options'
+    }
+  },
+  {
+    id: 7,
+    first_name: 'Amanda',
+    last_name: 'Davis',
+    email: 'amanda.davis@email.com',
+    phone: '(555) 678-9012',
+    address: '147 Willow Way',
+    city: 'Leander',
+    state: 'TX',
+    zip_code: '78641',
+    property_value: 510000,
+    roof_age: 25,
+    roof_material: 'Wood Shake',
+    roof_condition: 'Poor',
+    square_footage: 2900,
+    lead_score: 91,
+    status: 'hot',
+    income_bracket: 'High',
+    contact_preference: 'email',
+    best_time_to_call: 'afternoon',
+    created_at: '2024-01-23T11:20:00Z',
+    last_contacted: '2024-01-25T13:15:00Z',
+    notes: 'Wood shake replacement needed, concerned about fire safety',
+    scan_id: 'scan_007',
+    source: 'Area Scan - Leander',
+    activities: [
+      { type: 'scan_lead_created', date: '2024-01-23T11:20:00Z', description: 'Lead discovered via area scan' },
+      { type: 'email_sent', date: '2024-01-25T13:15:00Z', description: 'Fire-resistant roofing options and safety information sent' }
+    ],
+    homeowner_name: 'Amanda Davis',
+    aerial_image_url: 'https://images.fishmouth.ai/demo/normalized-7.jpg',
+    damage_indicators: ['wood_rot', 'moss_growth'],
+    replacement_urgency: 'immediate',
+    image_quality_score: 82,
+    quality_validation_status: 'passed',
+    ai_insights: {
+      deal_probability: 88,
+      urgency_score: 82,
+      budget_fit: 'High',
+      decision_timeline: '2-4 weeks',
+      key_motivators: ['Fire safety', 'Insurance requirements', 'Property protection'],
+      potential_objections: ['Material selection', 'Timeline coordination'],
+      recommended_approach: 'Lead with fire-resistant materials and safety benefits'
+    }
+  },
+  {
+    id: 8,
+    first_name: 'Christopher',
+    last_name: 'Brown',
+    email: 'chris.brown.house@outlook.com',
+    phone: '(555) 789-0123',
+    address: '258 Spruce Street',
+    city: 'Georgetown',
+    state: 'TX',
+    zip_code: '78628',
+    property_value: 445000,
+    roof_age: 14,
+    roof_material: 'Metal',
+    roof_condition: 'Good',
+    square_footage: 2500,
+    lead_score: 71,
+    status: 'warm',
+    income_bracket: 'Medium-High',
+    contact_preference: 'phone',
+    best_time_to_call: 'morning',
+    created_at: '2024-01-24T09:30:00Z',
+    last_contacted: null,
+    notes: 'Metal roof maintenance and repair inquiry',
+    scan_id: 'scan_008',
+    source: 'Area Scan - Georgetown',
+    activities: [
+      { type: 'scan_lead_created', date: '2024-01-24T09:30:00Z', description: 'Lead discovered via area scan' }
+    ],
+    ai_insights: {
+      deal_probability: 65,
+      urgency_score: 50,
+      budget_fit: 'Medium',
+      decision_timeline: '8-16 weeks',
+      key_motivators: ['Preventive maintenance', 'Extend roof life', 'Professional service'],
+      potential_objections: ['Necessity of repairs', 'Cost justification'],
+      recommended_approach: 'Focus on preventive maintenance value and warranty extensions'
+    }
+  },
+  {
+    id: 9,
+    first_name: 'Nicole',
+    last_name: 'Taylor',
+    email: 'nicole.taylor@company.org',
+    phone: '(555) 890-1234',
+    address: '369 Aspen Drive',
+    city: 'Hutto',
+    state: 'TX',
+    zip_code: '78634',
+    property_value: 385000,
+    roof_age: 19,
+    roof_material: 'Asphalt Shingles',
+    roof_condition: 'Fair',
+    square_footage: 2000,
+    lead_score: 84,
+    status: 'warm',
+    income_bracket: 'Medium-High',
+    contact_preference: 'email',
+    best_time_to_call: 'afternoon',
+    created_at: '2024-01-25T15:45:00Z',
+    last_contacted: '2024-01-26T10:20:00Z',
+    notes: 'New homeowner, wants to upgrade roof for energy efficiency',
+    scan_id: 'scan_009',
+    source: 'Area Scan - Hutto',
+    activities: [
+      { type: 'scan_lead_created', date: '2024-01-25T15:45:00Z', description: 'Lead discovered via area scan' },
+      { type: 'email_sent', date: '2024-01-26T10:20:00Z', description: 'Energy-efficient roofing options and rebate information sent' }
+    ],
+    ai_insights: {
+      deal_probability: 75,
+      urgency_score: 65,
+      budget_fit: 'Medium-High',
+      decision_timeline: '4-6 weeks',
+      key_motivators: ['Energy savings', 'Environmental impact', 'Modern aesthetics'],
+      potential_objections: ['Return on investment', 'Disruption to new home'],
+      recommended_approach: 'Emphasize energy savings and available rebates/incentives'
+    }
+  },
+  {
+    id: 10,
+    first_name: 'Kevin',
+    last_name: 'Anderson',
+    email: 'kevin.anderson.home@yahoo.com',
+    phone: '(555) 901-2345',
+    address: '741 Poplar Place',
+    city: 'Manor',
+    state: 'TX',
+    zip_code: '78653',
+    property_value: 415000,
+    roof_age: 21,
+    roof_material: 'Tile',
+    roof_condition: 'Fair',
+    square_footage: 2300,
+    lead_score: 87,
+    status: 'hot',
+    income_bracket: 'Medium-High',
+    contact_preference: 'phone',
+    best_time_to_call: 'evening',
+    created_at: '2024-01-26T13:10:00Z',
+    last_contacted: '2024-01-27T18:45:00Z',
+    notes: 'Tile repair needed, considering full replacement for uniformity',
+    scan_id: 'scan_010',
+    source: 'Area Scan - Manor',
+    activities: [
+      { type: 'scan_lead_created', date: '2024-01-26T13:10:00Z', description: 'Lead discovered via area scan' },
+      { type: 'voice_call', date: '2024-01-27T18:45:00Z', description: 'Discussed repair vs replacement options' },
+      { type: 'sequence_enrolled', date: '2024-01-27T19:00:00Z', description: 'Added to tile roofing specialist sequence' }
+    ],
+    ai_insights: {
+      deal_probability: 82,
+      urgency_score: 75,
+      budget_fit: 'High',
+      decision_timeline: '3-5 weeks',
+      key_motivators: ['Aesthetic uniformity', 'Long-term durability', 'Property value'],
+      potential_objections: ['Repair vs replace decision', 'Color matching'],
+      recommended_approach: 'Show benefits of full replacement vs patchwork repairs'
+    }
+  }
+];
+
+export const mockDashboardStats = {
+  total_leads: 127,
+  hot_leads: 18,
+  warm_leads: 34,
+  cold_leads: 75,
+  average_lead_score: 78.5,
+  conversion_rate: 23.4,
+  revenue_this_month: 145000,
+  total_revenue: 890000,
+  active_scans: 3,
+  qualified_leads_today: 8,
+  ai_calls_completed: 67,
+  appointments_scheduled: 12,
+  pipeline_value: 456000,
+  avg_deal_size: 18500,
+  lead_response_rate: 73.2,
+  sequence_enrollment: 89,
+  monthly_growth_rate: 18.7,
+  customer_satisfaction_score: 94.1,
+  cost_per_lead: 1.23,
+  lifetime_value: 24500,
+  active_campaigns: 7,
+  email_open_rate: 67.8,
+  call_connect_rate: 81.4
+};
+
+export const mockAnalyticsData = {
+  overview: {
+    total_leads_generated: 1247,
+    total_contacted: 1089,
+    appointments_booked: 456,
+    deals_closed: 128,
+    total_revenue: 2340000,
+    avg_deal_size: 18281,
+    cost_per_lead: 1.13,
+    revenue_per_lead: 1876,
+    conversion_rate: 11.5,
+    appointment_show_rate: 78.3,
+    active_sequences: 12,
+    qualified_lead_rate: 34.2,
+    avg_response_time: '2.3 hours',
+    pipeline_value: 890000,
+    monthly_growth: 23.7,
+    customer_satisfaction: 94.2
+  },
+  monthly_trends: [
+    { month: 'Jan 2024', leads: 89, appointments: 34, deals: 8, revenue: 145600 },
+    { month: 'Feb 2024', leads: 112, appointments: 45, deals: 12, revenue: 198400 },
+    { month: 'Mar 2024', leads: 134, appointments: 52, deals: 15, revenue: 267500 },
+    { month: 'Apr 2024', leads: 156, appointments: 61, deals: 18, revenue: 324200 },
+    { month: 'May 2024', leads: 143, appointments: 58, deals: 16, revenue: 298700 },
+    { month: 'Jun 2024', leads: 167, appointments: 67, deals: 21, revenue: 378900 },
+    { month: 'Jul 2024', leads: 189, appointments: 78, deals: 24, revenue: 445600 },
+    { month: 'Aug 2024', leads: 145, appointments: 59, deals: 17, revenue: 312800 },
+    { month: 'Sep 2024', leads: 178, appointments: 71, deals: 22, revenue: 389200 },
+    { month: 'Oct 2024', leads: 134, appointments: 54, deals: 15, revenue: 278100 }
+  ],
+  lead_sources: [
+    { source: 'Area Scans', count: 456, percentage: 36.6, quality_score: 92 },
+    { source: 'Referrals', count: 289, percentage: 23.2, quality_score: 96 },
+    { source: 'Storm Chasers', count: 234, percentage: 18.8, quality_score: 88 },
+    { source: 'Social Media', count: 156, percentage: 12.5, quality_score: 74 },
+    { source: 'Website Forms', count: 112, percentage: 9.0, quality_score: 82 }
+  ],
+  ai_performance: {
+    total_ai_calls: 987,
+    successful_connections: 789,
+    appointments_booked: 234,
+    avg_call_duration: '4:32',
+    sentiment_positive: 67.8,
+    sentiment_neutral: 23.4,
+    sentiment_negative: 8.8,
+    top_objections: [
+      { objection: 'Price too high', frequency: 34.2 },
+      { objection: 'Not ready now', frequency: 28.7 },
+      { objection: 'Need multiple quotes', frequency: 19.5 },
+      { objection: 'Insurance questions', frequency: 12.8 },
+      { objection: 'Scheduling conflicts', frequency: 4.8 }
+    ]
+  },
+  sequence_performance: [
+    { name: 'Premium Client Follow-up', enrolled: 47, completed: 16, conversion_rate: 34.2 },
+    { name: 'Storm Damage Response', enrolled: 23, completed: 11, conversion_rate: 47.8 },
+    { name: 'Budget-Conscious Homeowners', enrolled: 89, completed: 20, conversion_rate: 22.5 },
+    { name: 'Energy Efficiency Upgrade', enrolled: 31, completed: 9, conversion_rate: 29.0 }
+  ],
+  geographic_data: [
+    { city: 'Austin', leads: 234, deals: 28, avg_value: 19500 },
+    { city: 'Round Rock', leads: 156, deals: 19, avg_value: 21200 },
+    { city: 'Cedar Park', leads: 123, deals: 15, avg_value: 18900 },
+    { city: 'Pflugerville', leads: 98, deals: 12, avg_value: 17800 },
+    { city: 'Georgetown', leads: 87, deals: 11, avg_value: 20100 },
+    { city: 'Leander', leads: 76, deals: 9, avg_value: 18600 },
+    { city: 'Hutto', leads: 67, deals: 8, avg_value: 17200 },
+    { city: 'Manor', leads: 45, deals: 5, avg_value: 16800 }
+  ]
+};
+
+export const mockRecentScans = [
+  {
+    id: 'scan_001',
+    area_name: 'Central Austin',
+    zip_code: '78701',
+    status: 'completed',
+    qualified_leads: 15,
+    total_properties: 342,
+    created_at: '2024-01-15T10:30:00Z',
+    completed_at: '2024-01-15T12:45:00Z'
+  },
+  {
+    id: 'scan_002',
+    area_name: 'East Austin',
+    zip_code: '78702',
+    status: 'completed',
+    qualified_leads: 12,
+    total_properties: 298,
+    created_at: '2024-01-18T09:45:00Z',
+    completed_at: '2024-01-18T11:30:00Z'
+  },
+  {
+    id: 'scan_003',
+    area_name: 'South Austin',
+    zip_code: '78704',
+    status: 'in_progress',
+    qualified_leads: 8,
+    total_properties: 156,
+    created_at: '2024-01-27T14:20:00Z',
+    estimated_completion: '2024-01-27T16:30:00Z'
+  }
+];
+
+export const mockActivities = [
+  {
+    id: 1,
+    activity_type: 'voice_call',
+    title: 'AI Voice Call Completed',
+    description: 'Successful call with Sarah Johnson - interested in quote',
+    lead_id: 1,
+    created_at: '2024-01-27T14:22:00Z',
+    metadata: { duration: '8:34', outcome: 'interested', follow_up: 'quote_requested' }
+  },
+  {
+    id: 2,
+    activity_type: 'email_sent',
+    title: 'Quote Email Sent',
+    description: 'Detailed quote and company information sent to Michael Chen',
+    lead_id: 2,
+    created_at: '2024-01-27T13:15:00Z',
+    metadata: { template: 'quote_follow_up', opened: true, clicked: false }
+  },
+  {
+    id: 3,
+    activity_type: 'sequence_enrolled',
+    title: 'Lead Added to Sequence',
+    description: 'David Thompson enrolled in premium client sequence',
+    lead_id: 4,
+    created_at: '2024-01-27T12:00:00Z',
+    metadata: { sequence_name: 'Premium Client Follow-up', step: 1 }
+  },
+  {
+    id: 4,
+    activity_type: 'scan_lead_created',
+    title: 'New Lead Discovered',
+    description: 'High-scoring lead found in Manor area scan',
+    lead_id: 10,
+    created_at: '2024-01-27T11:30:00Z',
+    metadata: { scan_id: 'scan_010', score: 87, area: 'Manor' }
+  },
+  {
+    id: 5,
+    activity_type: 'sms_sent',
+    title: 'SMS Reminder Sent',
+    description: 'Appointment reminder sent to Jennifer Rodriguez',
+    lead_id: 3,
+    created_at: '2024-01-27T10:45:00Z',
+    metadata: { template: 'appointment_reminder', delivered: true }
+  }
+];
+
+export const mockSequences = [
+  {
+    id: 1,
+    name: 'Premium Client Follow-up',
+    description: 'High-value lead nurturing sequence with personalized messaging',
+    total_enrolled: 47,
+    conversion_rate: 34.2,
+    status: 'active',
+    steps: 5,
+    created_at: '2024-01-15T10:30:00Z'
+  },
+  {
+    id: 2,
+    name: 'Storm Damage Response',
+    description: 'Rapid response sequence for storm-damaged properties',
+    total_enrolled: 23,
+    conversion_rate: 45.8,
+    status: 'active',
+    steps: 3,
+    created_at: '2024-01-18T14:20:00Z'
+  },
+  {
+    id: 3,
+    name: 'Budget-Conscious Homeowners',
+    description: 'Financing-focused sequence for cost-sensitive leads',
+    total_enrolled: 89,
+    conversion_rate: 22.1,
+    status: 'active',
+    steps: 7,
+    created_at: '2024-01-10T09:15:00Z'
+  },
+  {
+    id: 4,
+    name: 'Energy Efficiency Upgrade',
+    description: 'Eco-friendly roofing solutions for environmentally conscious clients',
+    total_enrolled: 31,
+    conversion_rate: 28.9,
+    status: 'active',
+    steps: 4,
+    created_at: '2024-01-22T16:45:00Z'
+  }
+];

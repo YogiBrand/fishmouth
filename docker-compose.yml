@@ -1,0 +1,275 @@
+version: '3.8'
+
+services:
+  postgres:
+    image: postgres:15-alpine
+    container_name: fishmouth_postgres
+    environment:
+      POSTGRES_DB: fishmouth
+      POSTGRES_USER: fishmouth
+      POSTGRES_PASSWORD: fishmouth123
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U fishmouth"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    container_name: fishmouth_redis
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: fishmouth_backend
+    environment:
+      DATABASE_URL: postgresql://fishmouth:fishmouth123@postgres:5432/fishmouth
+      REDIS_URL: redis://redis:6379
+      JWT_SECRET: your-secret-key-change-in-production
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      ELEVENLABS_API_KEY: ${ELEVENLABS_API_KEY:-}
+      DEEPGRAM_API_KEY: ${DEEPGRAM_API_KEY:-}
+      TWILIO_ACCOUNT_SID: ${TWILIO_ACCOUNT_SID:-}
+      TWILIO_AUTH_TOKEN: ${TWILIO_AUTH_TOKEN:-}
+      TWILIO_PHONE_NUMBER: ${TWILIO_PHONE_NUMBER:-}
+    ports:
+      - "8000:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - ./backend:/app
+    command: uvicorn main:app --host 0.0.0.0 --port 8000 --reload
+
+  celery_worker:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: fishmouth_celery_worker
+    environment:
+      DATABASE_URL: postgresql://fishmouth:fishmouth123@postgres:5432/fishmouth
+      REDIS_URL: redis://redis:6379
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      ELEVENLABS_API_KEY: ${ELEVENLABS_API_KEY:-}
+      DEEPGRAM_API_KEY: ${DEEPGRAM_API_KEY:-}
+      TWILIO_ACCOUNT_SID: ${TWILIO_ACCOUNT_SID:-}
+      TWILIO_AUTH_TOKEN: ${TWILIO_AUTH_TOKEN:-}
+      TWILIO_PHONE_NUMBER: ${TWILIO_PHONE_NUMBER:-}
+    depends_on:
+      - postgres
+      - redis
+    volumes:
+      - ./backend:/app
+    command: celery -A celery_app worker --loglevel=info
+
+  voice_server:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: fishmouth_voice_server
+    environment:
+      DATABASE_URL: postgresql://fishmouth:fishmouth123@postgres:5432/fishmouth
+      REDIS_URL: redis://redis:6379
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      ELEVENLABS_API_KEY: ${ELEVENLABS_API_KEY:-}
+      DEEPGRAM_API_KEY: ${DEEPGRAM_API_KEY:-}
+      TWILIO_ACCOUNT_SID: ${TWILIO_ACCOUNT_SID:-}
+      TWILIO_AUTH_TOKEN: ${TWILIO_AUTH_TOKEN:-}
+    ports:
+      - "8001:8001"
+    depends_on:
+      - postgres
+      - redis
+    volumes:
+      - ./backend:/app
+    command: uvicorn voice_server:app --host 0.0.0.0 --port 8001 --reload
+
+  # Data Acquisition Services
+  scraper-service:
+    build:
+      context: ./services/scraper-service
+      dockerfile: Dockerfile
+    container_name: fishmouth_scraper_service
+    environment:
+      DATABASE_URL: postgresql://fishmouth:fishmouth123@postgres:5432/fishmouth
+      REDIS_URL: redis://redis:6379
+      GOOGLE_MAPS_API_KEY: ${GOOGLE_MAPS_API_KEY:-}
+      MAPBOX_API_KEY: ${MAPBOX_API_KEY:-}
+    ports:
+      - "8011:8011"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - ./services/scraper-service:/app
+      - ./shared:/app/shared
+    restart: unless-stopped
+
+  enrichment-service:
+    build:
+      context: ./services/enrichment-service
+      dockerfile: Dockerfile
+    container_name: fishmouth_enrichment_service
+    environment:
+      DATABASE_URL: postgresql://fishmouth:fishmouth123@postgres:5432/fishmouth
+      REDIS_URL: redis://redis:6379
+      GOOGLE_MAPS_API_KEY: ${GOOGLE_MAPS_API_KEY:-}
+      MAPBOX_API_KEY: ${MAPBOX_API_KEY:-}
+      HUNTER_IO_API_KEY: ${HUNTER_IO_API_KEY:-}
+      CLEARBIT_API_KEY: ${CLEARBIT_API_KEY:-}
+    ports:
+      - "8004:8004"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - ./services/enrichment-service:/app
+      - ./shared:/app/shared
+    restart: unless-stopped
+
+  lead-generator:
+    build:
+      context: ./services/lead-generator
+      dockerfile: Dockerfile
+    container_name: fishmouth_lead_generator
+    environment:
+      DATABASE_URL: postgresql://fishmouth:fishmouth123@postgres:5432/fishmouth
+      REDIS_URL: redis://redis:6379
+    ports:
+      - "8008:8008"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - ./services/lead-generator:/app
+      - ./shared:/app/shared
+    restart: unless-stopped
+
+  orchestrator:
+    build:
+      context: ./services/orchestrator
+      dockerfile: Dockerfile
+    container_name: fishmouth_orchestrator
+    environment:
+      DATABASE_URL: postgresql://fishmouth:fishmouth123@postgres:5432/fishmouth
+      REDIS_URL: redis://redis:6379
+    ports:
+      - "8009:8009"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      enrichment-service:
+        condition: service_started
+      lead-generator:
+        condition: service_started
+      image-processor:
+        condition: service_started
+    volumes:
+      - ./services/orchestrator:/app
+      - ./shared:/app/shared
+    restart: unless-stopped
+
+  # Image Processing Service
+  image-processor:
+    build:
+      context: ./services/image-processor
+      dockerfile: Dockerfile
+    container_name: fishmouth_image_processor
+    environment:
+      DATABASE_URL: postgresql://fishmouth:fishmouth123@postgres:5432/fishmouth
+      REDIS_URL: redis://redis:6379
+      GOOGLE_MAPS_API_KEY: ${GOOGLE_MAPS_API_KEY:-}
+      MAPBOX_API_KEY: ${MAPBOX_API_KEY:-}
+    ports:
+      - "8012:8012"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - ./services/image-processor:/app
+      - ./shared:/app/shared
+      - ./data/images:/app/images
+    restart: unless-stopped
+
+  # ML Inference Service
+  ml-inference:
+    build:
+      context: ./services/ml-inference
+      dockerfile: Dockerfile
+    container_name: fishmouth_ml_inference
+    environment:
+      DATABASE_URL: postgresql://fishmouth:fishmouth123@postgres:5432/fishmouth
+      REDIS_URL: redis://redis:6379
+    ports:
+      - "8013:8013"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      image-processor:
+        condition: service_started
+    volumes:
+      - ./services/ml-inference:/app
+      - ./shared:/app/shared
+      - ./data/images:/app/images
+      - ./models:/app/models
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: fishmouth_frontend
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+    environment:
+      - REACT_APP_API_URL=http://backend:8000
+      - REACT_APP_SCRAPER_URL=http://scraper-service:8002
+      - REACT_APP_ENRICHMENT_URL=http://enrichment-service:8004
+      - REACT_APP_LEAD_GENERATOR_URL=http://lead-generator:8008
+      - REACT_APP_ORCHESTRATOR_URL=http://orchestrator:8009
+      - WATCHPACK_POLLING=true
+      - CHOKIDAR_USEPOLLING=true
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    depends_on:
+      - backend
+      - orchestrator
+    stdin_open: true
+    tty: true
+
+volumes:
+  postgres_data:
+  scraper_data:
+  enrichment_data:
+
