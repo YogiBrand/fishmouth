@@ -58,3 +58,4 @@ coverage/
 tmp/
 
 
+.github/workflows/devops-hardening.yml
