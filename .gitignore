@@ -57,5 +57,11 @@ coverage/
 .playwright/
 tmp/
 
+# --- Data artifacts ---
+data/*
+!data/geojson/
+!data/geojson/*.geojson
+!data/intermediate/
+!data/intermediate/roofing_market_summary.json
 
 .github/workflows/devops-hardening.yml

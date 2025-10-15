@@ -267,6 +267,28 @@
   background: linear-gradient(135deg, var(--color-brand-strong), var(--color-brand));
 }
 
+.button--ghost {
+  background: transparent;
+  border-color: rgba(148, 163, 184, 0.16);
+  color: var(--color-text-muted);
+}
+
+.button--ghost:hover {
+  color: var(--color-text);
+  border-color: rgba(56, 189, 248, 0.22);
+  background: rgba(56, 189, 248, 0.08);
+}
+
+.button--md {
+  padding: 10px 16px;
+  font-size: 0.92rem;
+}
+
+.button--sm {
+  padding: 7px 12px;
+  font-size: 0.78rem;
+}
+
 .card {
   background: linear-gradient(180deg, rgba(15, 23, 42, 0.82), rgba(11, 18, 32, 0.96));
   border: 1px solid var(--color-border);
@@ -445,6 +467,10 @@
 
 .table tbody tr:hover {
   background: rgba(56, 189, 248, 0.08);
+}
+
+.table__row--interactive {
+  cursor: pointer;
 }
 
 .table__empty {

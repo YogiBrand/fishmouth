@@ -45,7 +45,7 @@ services:
     environment:
       DATABASE_URL: postgresql://user:pass@postgres:5432/app
       ANALYTICS_URL: postgresql://user:pass@postgres:5432/app
-      TELEMETRY_URL: ${TELEMETRY_URL}
+      TELEMETRY_URL: ${TELEMETRY_URL:-http://telemetry_gw_8030:8030}
     depends_on:
       postgres:
         condition: service_healthy
@@ -58,7 +58,7 @@ services:
     build:
       context: ./services/billing-gw-8032
     environment:
-      TELEMETRY_URL: ${TELEMETRY_URL}
+      TELEMETRY_URL: ${TELEMETRY_URL:-http://telemetry_gw_8030:8030}
       STRIPE_SECRET_KEY: ${STRIPE_SECRET_KEY:-}
     depends_on:
       telemetry_gw_8030:

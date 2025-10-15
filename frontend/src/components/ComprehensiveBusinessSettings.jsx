@@ -967,8 +967,7 @@ const ComprehensiveBusinessSettings = () => {
               <button
                 onClick={saveBusinessProfile}
                 disabled={loading}
-                className="flex items-center space-x-2 px-4 py-2 disabled:opacity-50 text-white rounded-xl shadow-lg transition"
-                style={{ background: 'linear-gradient(90deg, var(--brand-primary), var(--brand-accent))' }}
+                className="flex items-center space-x-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white rounded-xl shadow-lg transition"
               >
                 {loading ? <Loader size={16} className="animate-spin" /> : <Save size={16} />}
                 <span>Save Changes</span>
@@ -2222,7 +2221,7 @@ const PortfolioSection = ({ data, onChange, onAddItem, onRemoveItem, knowledgeIt
 );
 
 // AI Messaging Section Component
-const AIMessagingSection = ({ data, onChange, onAddItem, onRemoveItem, businessData }) => (
+const AIMessagingSection = ({ data, onChange, onAddItem, onRemoveItem, businessData, knowledgeItems = [], onKnowledgeChange = () => {} }) => (
   <div className="space-y-6">
     <div className="bg-white dark:bg-slate-900/70/70 backdrop-sm rounded-2xl border border-slate-200/60 shadow-xl p-6">
       <div className="flex items-center space-x-3 mb-6">
@@ -2280,7 +2279,11 @@ const AIMessagingSection = ({ data, onChange, onAddItem, onRemoveItem, businessD
             agentConfig={data}
           />
 
-          {/* Knowledge base displayed/managed on Portfolio tab; shown here as read-only summary in future */}
+          <div className="rounded-2xl border p-5" style={{ borderColor: 'color-mix(in srgb, var(--brand-secondary) 20%, #e2e8f0)' }}>
+            <h3 className="text-lg font-semibold text-slate-900 mb-2">AI Knowledge Base</h3>
+            <p className="text-sm text-slate-500 mb-4">Upload collateral (pricing sheets, warranties, scripts). Add instructions so AI knows when and how to use it for voice, SMS, or email.</p>
+            <KnowledgeUploader items={knowledgeItems} onChange={onKnowledgeChange} />
+          </div>
         </div>
       </div>
     </div>
@@ -2394,8 +2397,8 @@ const ColorPicker = ({ label, value, onChange, onExtractFromLogo }) => (
         type="color"
         value={value}
         onChange={(e) => onChange(e.target.value)}
-        className="w-14 h-14 rounded-full border-2 border-slate-200 cursor-pointer"
-      />
+          className="w-14 h-14 rounded-full border-2 border-slate-200 cursor-pointer"
+        />
       <input
         type="text"
         value={value}

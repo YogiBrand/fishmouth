@@ -1,5 +1,14 @@
 import React from 'react'
-import { Routes, Route, NavLink } from 'react-router-dom'
+import { Routes, Route } from 'react-router-dom'
+import {
+  LayoutDashboard,
+  Users as UsersIcon,
+  Activity,
+  Coins,
+  HeartPulse,
+  MessageSquare,
+  ServerCog,
+} from 'lucide-react'
 import Overview from './pages/Overview.jsx'
 import Users from './pages/Users.jsx'
 import Usage from './pages/Usage.jsx'
@@ -7,38 +16,50 @@ import Costs from './pages/Costs.jsx'
 import Health from './pages/Health.jsx'
 import Messaging from './pages/Messaging.jsx'
 import JobsQueues from './pages/JobsQueues.jsx'
+import LayoutShell from './components/LayoutShell.jsx'
+import { ThemeProvider } from './theme/ThemeProvider.jsx'
+import { ToastProvider } from './components/ToastProvider.jsx'
 import './App.css'
 
-const Nav = () => (
-  <nav className="nav">
-    <a className="brand">Admin</a>
-    <ul>
-      <li><NavLink to="/">Overview</NavLink></li>
-      <li><NavLink to="/users">Users</NavLink></li>
-      <li><NavLink to="/usage">Usage</NavLink></li>
-      <li><NavLink to="/costs">Costs</NavLink></li>
-      <li><NavLink to="/health">Health</NavLink></li>
-      <li><NavLink to="/messaging">Messaging</NavLink></li>
-      <li><NavLink to="/jobs">Jobs</NavLink></li>
-    </ul>
-  </nav>
-)
+const NAVIGATION = [
+  {
+    label: 'Mission',
+    items: [
+      { label: 'Overview', icon: LayoutDashboard, to: '/', exact: true },
+      { label: 'Messaging', icon: MessageSquare, to: '/messaging' },
+      { label: 'Jobs & Queues', icon: ServerCog, to: '/jobs' },
+    ],
+  },
+  {
+    label: 'People',
+    items: [{ label: 'Users', icon: UsersIcon, to: '/users' }],
+  },
+  {
+    label: 'Insights',
+    items: [
+      { label: 'Usage', icon: Activity, to: '/usage' },
+      { label: 'Costs', icon: Coins, to: '/costs' },
+      { label: 'Health', icon: HeartPulse, to: '/health' },
+    ],
+  },
+]
 
-export default function App(){
+export default function App() {
   return (
-    <div className="layout">
-      <Nav />
-      <main className="content">
-        <Routes>
-          <Route path="/" element={<Overview/>} />
-          <Route path="/users" element={<Users/>} />
-          <Route path="/usage" element={<Usage/>} />
-          <Route path="/costs" element={<Costs/>} />
-          <Route path="/health" element={<Health/>} />
-          <Route path="/messaging" element={<Messaging/>} />
-          <Route path="/jobs" element={<JobsQueues/>} />
-        </Routes>
-      </main>
-    </div>
+    <ThemeProvider>
+      <ToastProvider>
+        <LayoutShell navigation={NAVIGATION}>
+          <Routes>
+            <Route path="/" element={<Overview />} />
+            <Route path="/users" element={<Users />} />
+            <Route path="/usage" element={<Usage />} />
+            <Route path="/costs" element={<Costs />} />
+            <Route path="/health" element={<Health />} />
+            <Route path="/messaging" element={<Messaging />} />
+            <Route path="/jobs" element={<JobsQueues />} />
+          </Routes>
+        </LayoutShell>
+      </ToastProvider>
+    </ThemeProvider>
   )
 }

@@ -1,0 +1,44 @@
+[
+  {
+    "slug": "palm_beach_fl",
+    "name": "Palm Beach Barrier Island",
+    "description": "Oceanfront estates with legacy tile roofs; hurricane + salt exposure.",
+    "hazard_focus": "Hurricane, hail, coastal wind uplift",
+    "storm_counts": {
+      "hail": 30,
+      "wind": 61,
+      "hurricane": 11,
+      "flood": 69,
+      "hazard_score": 210.8
+    },
+    "feature_count": 70
+  },
+  {
+    "slug": "naples_fl",
+    "name": "Port Royal & Old Naples",
+    "description": "Ultra-luxury gulf coastline, high FEMA flood premiums, complex roofs.",
+    "hazard_focus": "Tropical storms, king tide intrusion, salt corrosion",
+    "storm_counts": {
+      "hail": 6,
+      "wind": 11,
+      "hurricane": 5,
+      "flood": 20,
+      "hazard_score": 53.3
+    },
+    "feature_count": 280
+  },
+  {
+    "slug": "scarsdale_ny",
+    "name": "Scarsdale & Bronxville",
+    "description": "Historic slate roofs with freeze/thaw cycles and insurance-driven work.",
+    "hazard_focus": "Ice dams, hail, treefall wind loading",
+    "storm_counts": {
+      "hail": 14,
+      "wind": 89,
+      "hurricane": 2,
+      "flood": 94,
+      "hazard_score": 218.8
+    },
+    "feature_count": 930
+  }
+]
