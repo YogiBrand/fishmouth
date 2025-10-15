@@ -1,9 +1,9 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { 
-  FileText, ArrowLeft, Settings, Home, 
+import {
+  FileText, ArrowLeft, Settings, Home,
   AlertCircle, CheckCircle, Clock,
-  Plus, Eye
+  Plus, Eye, Sparkles
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import EnhancedReportGenerator from '../components/EnhancedReportGenerator';
@@ -188,72 +188,106 @@ const EnhancedReportsPage = () => {
           {/* Main Content */}
           <div className="lg:col-span-3 space-y-8">
             {/* Lead Selection & Report Creation */}
-            <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
-              <div className="flex items-center justify-between mb-6">
-                <div>
-                  <h2 className="text-xl font-semibold text-gray-900">Create New Report</h2>
-                  <p className="text-gray-600">Generate professional reports with AI-powered content</p>
-                </div>
-                <button
-                  onClick={handleCreateReport}
-                  disabled={!selectedLead}
-                  className="flex items-center gap-2 px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                >
-                  <Plus className="w-5 h-5" />
-                  Create Report
-                </button>
-              </div>
-
-              {/* Lead Selection */}
-              <div className="space-y-4">
-                <label className="block text-sm font-medium text-gray-700">
-                  Select Lead for Report
-                </label>
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                  {leads.slice(0, 6).map((lead) => (
-                    <div
-                      key={lead.id}
-                      onClick={() => handleLeadSelect(lead)}
-                      className={`p-4 rounded-lg border-2 cursor-pointer transition-all ${
-                        selectedLead?.id === lead.id
-                          ? 'border-blue-500 bg-blue-50'
-                          : 'border-gray-200 hover:border-gray-300 bg-white'
-                      }`}
+            <div className="relative overflow-hidden rounded-3xl border border-gray-200 shadow-sm">
+              <div className="absolute inset-0 bg-gradient-to-r from-blue-600/15 via-purple-500/10 to-transparent" />
+              <div className="absolute -top-16 -right-24 h-56 w-56 rounded-full bg-blue-500/10 blur-3xl" />
+              <div className="relative p-6 sm:p-8">
+                <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-6">
+                  <div className="space-y-3 max-w-2xl">
+                    <div className="inline-flex items-center gap-2 rounded-full bg-white/70 px-3 py-1 text-xs font-semibold text-blue-700 shadow-sm">
+                      <Sparkles className="h-3.5 w-3.5" />
+                      AI-Accelerated Proposal Builder
+                    </div>
+                    <h2 className="text-3xl font-semibold text-gray-900 tracking-tight">
+                      Launch a polished, branded report in minutes
+                    </h2>
+                    <p className="text-sm sm:text-base text-gray-600">
+                      Pair your business profile, imagery, and lead intelligence with best-practice report templates. Every document comes ready with a shareable microsite and one-click PDF export.
+                    </p>
+                    <div className="flex flex-wrap gap-3 text-xs sm:text-sm">
+                      <span className="inline-flex items-center gap-2 rounded-full bg-white px-3 py-1 text-blue-600 shadow-sm">
+                        <CheckCircle className="h-4 w-4" /> Live branding pulled from settings
+                      </span>
+                      <span className="inline-flex items-center gap-2 rounded-full bg-white px-3 py-1 text-purple-600 shadow-sm">
+                        <Sparkles className="h-4 w-4" /> AI copy tuned for roofing buyers
+                      </span>
+                    </div>
+                  </div>
+                  <div className="flex flex-col items-start sm:items-end gap-4">
+                    <button
+                      onClick={handleCreateReport}
+                      disabled={!selectedLead}
+                      className="inline-flex items-center gap-2 rounded-full bg-gradient-to-r from-blue-600 to-purple-600 px-6 py-3 text-sm font-semibold text-white shadow-lg shadow-blue-500/20 transition hover:shadow-blue-500/30 disabled:cursor-not-allowed disabled:from-gray-300 disabled:to-gray-400"
                     >
-                      <div className="flex items-start gap-3">
-                        <div className="p-2 bg-blue-100 rounded-lg">
-                          <Home className="w-4 h-4 text-blue-600" />
-                        </div>
-                        <div className="flex-1 min-w-0">
-                          <p className="font-medium text-gray-900 truncate">
-                            {lead.homeowner_name || lead.address || 'Unknown Lead'}
-                          </p>
-                          <p className="text-sm text-gray-600 truncate">
-                            {lead.address}
-                          </p>
-                          <p className="text-xs text-gray-500">
-                            {lead.property_type || 'Residential'} • 
-                            {lead.roof_age_years ? ` ${lead.roof_age_years}yr roof` : ' Age unknown'}
-                          </p>
-                        </div>
-                        {selectedLead?.id === lead.id && (
-                          <CheckCircle className="w-5 h-5 text-blue-600" />
-                        )}
+                      <Plus className="w-5 h-5" />
+                      {selectedLead ? 'Create Report' : 'Select a lead to begin'}
+                    </button>
+                    <div className="grid grid-cols-2 gap-3 text-xs sm:text-sm text-gray-600">
+                      <div className="rounded-xl bg-white/80 px-4 py-3 shadow-sm">
+                        <div className="text-xs uppercase tracking-wide text-gray-500">Active Leads</div>
+                        <div className="text-lg font-semibold text-gray-900">{leads.length}</div>
+                      </div>
+                      <div className="rounded-xl bg-white/80 px-4 py-3 shadow-sm">
+                        <div className="text-xs uppercase tracking-wide text-gray-500">Reports Sent</div>
+                        <div className="text-lg font-semibold text-gray-900">{recentReports.length}</div>
                       </div>
                     </div>
-                  ))}
-                </div>
-                
-                {leads.length > 6 && (
-                  <div className="text-center">
-                    <button
-                      onClick={() => navigate('/dashboard?view=leads')}
-                      className="text-blue-600 hover:text-blue-700 text-sm font-medium"
-                    >
-                      View all {leads.length} leads →
-                    </button>
                   </div>
-                )}
+                </div>
+
+                <div className="mt-8 rounded-2xl border border-white/70 bg-white/80 p-5 shadow-inner backdrop-blur">
+                  <div className="flex items-center justify-between mb-4">
+                    <label className="block text-sm font-semibold text-gray-800">
+                      Select the lead you want to wow
+                    </label>
+                    <span className="text-xs text-gray-500 hidden sm:inline">Showing top suggestions · refresh for the latest activity</span>
+                  </div>
+                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                    {leads.slice(0, 6).map((lead) => (
+                      <button
+                        key={lead.id}
+                        type="button"
+                        onClick={() => handleLeadSelect(lead)}
+                        className={`w-full text-left rounded-2xl border-2 px-4 py-4 transition-all ${
+                          selectedLead?.id === lead.id
+                            ? 'border-blue-500 bg-blue-50 shadow-sm'
+                            : 'border-gray-200 bg-white hover:border-blue-200 hover:shadow-sm'
+                        }`}
+                      >
+                        <div className="flex items-start gap-3">
+                          <div className="p-2 bg-blue-100 rounded-xl">
+                            <Home className="w-4 h-4 text-blue-600" />
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <p className="font-semibold text-gray-900 truncate">
+                              {lead.homeowner_name || lead.address || 'Unknown Lead'}
+                            </p>
+                            <p className="text-sm text-gray-600 truncate">
+                              {lead.address}
+                            </p>
+                            <p className="text-xs text-gray-500">
+                              {lead.property_type || 'Residential'} •
+                              {lead.roof_age_years ? ` ${lead.roof_age_years} yr roof` : ' age TBD'}
+                            </p>
+                          </div>
+                          {selectedLead?.id === lead.id && (
+                            <CheckCircle className="w-5 h-5 text-blue-600" />
+                          )}
+                        </div>
+                      </button>
+                    ))}
+                  </div>
+                  {leads.length > 6 && (
+                    <div className="mt-4 text-center">
+                      <button
+                        onClick={() => navigate('/dashboard?view=leads')}
+                        className="text-sm font-medium text-blue-600 hover:text-blue-700"
+                      >
+                        View all {leads.length} leads →
+                      </button>
+                    </div>
+                  )}
+                </div>
               </div>
             </div>
 

@@ -1,0 +1,70 @@
+version: '3.9'
+
+services:
+  postgres:
+    image: postgres:15
+    environment:
+      POSTGRES_DB: app
+      POSTGRES_USER: user
+      POSTGRES_PASSWORD: pass
+    ports:
+      - "55432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U user"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "56379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  telemetry_gw_8030:
+    build:
+      context: ./services/telemetry-8030
+    environment:
+      DATABASE_URL: postgresql://user:pass@postgres:5432/app
+      ANALYTICS_URL: postgresql://user:pass@postgres:5432/app
+    depends_on:
+      postgres:
+        condition: service_healthy
+    ports:
+      - "8030:8030"
+
+  admin_api_8031:
+    build:
+      context: ./services/admin-api-8031
+    environment:
+      DATABASE_URL: postgresql://user:pass@postgres:5432/app
+      ANALYTICS_URL: postgresql://user:pass@postgres:5432/app
+      TELEMETRY_URL: ${TELEMETRY_URL}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      telemetry_gw_8030:
+        condition: service_started
+    ports:
+      - "8031:8031"
+
+  billing_gw_8032:
+    build:
+      context: ./services/billing-gw-8032
+    environment:
+      TELEMETRY_URL: ${TELEMETRY_URL}
+      STRIPE_SECRET_KEY: ${STRIPE_SECRET_KEY:-}
+    depends_on:
+      telemetry_gw_8030:
+        condition: service_started
+    ports:
+      - "8032:8032"
+
+volumes:
+  postgres_data:

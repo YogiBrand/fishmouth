@@ -1,0 +1,30 @@
+openapi: 3.0.3
+info:
+  title: Address Lookup
+  version: '1.0'
+paths:
+  /api/lookup/address:
+    post:
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                address: { type: string }
+                include_imagery: { type: boolean }
+                include_permits: { type: boolean }
+      responses:
+        '200':
+          description: queued
+  /api/lookup/{job_id}:
+    get:
+      parameters:
+        - in: path
+          name: job_id
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: progressive result

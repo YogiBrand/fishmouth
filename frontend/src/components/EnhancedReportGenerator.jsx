@@ -6,6 +6,7 @@ import {
   Loader,
   RefreshCw,
   Save,
+  Download,
   Send,
   ArrowLeft,
   AlertCircle,
@@ -24,6 +25,245 @@ import { resolveReportTokens } from '../utils/reportTokens';
 import { getLeadUrgency, formatLeadAgeLabel, resolveLeadCreatedAt } from '../utils/leads';
 
 const STEP_SEQUENCE = ['lead-selection', 'type-selection', 'customization', 'preview'];
+
+const SECTION_TEMPLATES = {
+  executive_summary: {
+    title: 'Executive Summary',
+    description: 'AI-generated overview of findings and recommended next steps',
+    aiPrompt:
+      'Create a professional executive summary for a roofing assessment report for {property_address}. Include key findings, urgency, and main recommendations. Keep it punchy, confident, and homeowner-friendly.',
+    aiEnabled: true,
+    defaultEnabled: true,
+  },
+  property_overview: {
+    title: 'Property Overview',
+    description: 'High-level context about the property, roof system, and neighbourhood',
+    aiPrompt:
+      'Write a property overview for {property_address}. Reference property type, neighbourhood context, roof specifications, and any notable location details. Use two short paragraphs that make the homeowner feel seen.',
+    aiEnabled: true,
+    defaultEnabled: true,
+  },
+  damage_analysis: {
+    title: 'Damage Analysis',
+    description: 'Detailed breakdown of AI and inspection findings',
+    aiPrompt:
+      'Generate a detailed damage analysis for the roof at {property_address}. Reference imagery overlays, AI indicators, and likely causes. Provide clear homeowner language and note potential risks if deferred.',
+    aiEnabled: true,
+    defaultEnabled: true,
+  },
+  inspection_findings: {
+    title: 'Inspection Findings',
+    description: 'On-the-ground observations summarised for the homeowner',
+    aiPrompt:
+      'Summarise key inspection findings for the roof at {property_address}. Blend AI observations with field insights. Highlight areas that merit attention and explain what was confirmed on-site.',
+    aiEnabled: true,
+    defaultEnabled: false,
+  },
+  recommendations: {
+    title: 'Recommendations',
+    description: 'Prioritised action plan with timing and rationale',
+    aiPrompt:
+      'Create prioritised recommendations for roof repairs based on the assessment. Include immediate tasks, proactive maintenance, and optional upgrades. Format as persuasive but transparent paragraphs.',
+    aiEnabled: true,
+    defaultEnabled: true,
+  },
+  maintenance_schedule: {
+    title: 'Maintenance Schedule',
+    description: 'Preventive plan to extend roof life',
+    aiPrompt:
+      'Outline a proactive maintenance schedule for the roof at {property_address}. Provide seasonal checkpoints and annual best practices. Keep it actionable and easy to follow for homeowners.',
+    aiEnabled: true,
+    defaultEnabled: false,
+  },
+  cost_estimates: {
+    title: 'Cost Estimates',
+    description: 'Transparent pricing narrative aligned with published services',
+    aiPrompt:
+      'Generate a professional cost estimates section using the business service data. Include pricing factors, ranges, and value proposition. Integrate actual business pricing when available.',
+    aiEnabled: true,
+    defaultEnabled: true,
+  },
+  before_after_gallery: {
+    title: 'Before & After Gallery',
+    description: 'Curated imagery with quality validation',
+    aiPrompt: null,
+    aiEnabled: false,
+    defaultEnabled: true,
+  },
+  customer_story: {
+    title: 'Customer Success Story',
+    description: 'Relatable narrative inspired by similar homeowners',
+    aiPrompt:
+      'Write an engaging customer success story about a similar roofing project. Focus on the homeowner\'s concerns, the solution process, and their satisfaction with results. Make it relatable to {property_type} homeowners.',
+    aiEnabled: true,
+    defaultEnabled: false,
+  },
+  testimonials: {
+    title: 'Testimonials',
+    description: 'Social proof pulled from your case studies library',
+    aiPrompt: null,
+    aiEnabled: false,
+    defaultEnabled: false,
+  },
+  company_profile: {
+    title: 'Company Profile',
+    description: 'Brand promise, credentials, and differentiators',
+    aiPrompt: null,
+    aiEnabled: false,
+    defaultEnabled: true,
+  },
+  next_steps: {
+    title: 'Next Steps',
+    description: 'Clear call-to-action to move the project forward',
+    aiPrompt:
+      'Create a clear "next steps" section that guides the homeowner through the process of moving forward. Include consultation booking, timeline expectations, and what to expect from the {company_name} team.',
+    aiEnabled: true,
+    defaultEnabled: true,
+  },
+  scope_of_work: {
+    title: 'Scope of Work',
+    description: 'Detailed breakdown of tasks and responsibilities',
+    aiPrompt:
+      'Describe the scope of work for the planned {report_type}. Outline preparation, installation, and finishing tasks. Emphasise craftsmanship and site protection standards upheld by {company_name}.',
+    aiEnabled: true,
+    defaultEnabled: false,
+  },
+  timeline: {
+    title: 'Project Timeline',
+    description: 'Phased view of the production schedule',
+    aiPrompt:
+      'Create a milestone-driven project timeline for the {report_type}. Include staging, production, quality checks, and close-out. Keep it clear for homeowners reviewing schedule expectations.',
+    aiEnabled: true,
+    defaultEnabled: false,
+  },
+  materials_overview: {
+    title: 'Materials Overview',
+    description: 'Specified product lines and warranty highlights',
+    aiPrompt:
+      'List the materials and product lines recommended by {company_name} for this project. Highlight warranties, performance benefits, and aesthetic upgrades homeowners will appreciate.',
+    aiEnabled: true,
+    defaultEnabled: false,
+  },
+  project_overview: {
+    title: 'Project Overview',
+    description: 'Executive brief for proposals and case studies',
+    aiPrompt:
+      'Summarise the project objectives for the homeowner at {property_address}. Explain the desired outcomes, value delivered, and communication approach from kickoff to close-out.',
+    aiEnabled: true,
+    defaultEnabled: false,
+  },
+  challenges: {
+    title: 'Project Challenges',
+    description: 'Site constraints or risk factors worth noting',
+    aiPrompt:
+      'Highlight the key project challenges or site constraints for {property_address}. Mention weather, access, roof geometry, or insurance considerations using confident, consultative language.',
+    aiEnabled: true,
+    defaultEnabled: false,
+  },
+  solutions: {
+    title: 'Solutions & Mitigation',
+    description: 'How your team resolves the identified challenges',
+    aiPrompt:
+      'Explain the solutions and process adjustments {company_name} will apply to overcome the challenges outlined. Reinforce expertise and proactive planning.',
+    aiEnabled: true,
+    defaultEnabled: false,
+  },
+  results: {
+    title: 'Expected Results',
+    description: 'Benefits, warranties, and homeowner outcomes',
+    aiPrompt:
+      'Paint the picture of the finished result and homeowner benefits once the project is complete. Reference curb appeal, protection, warranties, and resale value.',
+    aiEnabled: true,
+    defaultEnabled: false,
+  },
+};
+
+const REPORT_TYPES = [
+  {
+    id: 'damage-assessment',
+    title: 'Roof Damage Assessment',
+    description: 'Comprehensive damage analysis with repair recommendations',
+    icon: AlertCircle,
+    color: 'red',
+    sections: [
+      'executive_summary',
+      'property_overview',
+      'damage_analysis',
+      'inspection_findings',
+      'recommendations',
+      'cost_estimates',
+      'before_after_gallery',
+      'company_profile',
+      'next_steps',
+    ],
+  },
+  {
+    id: 'inspection-report',
+    title: 'Property Inspection Report',
+    description: 'Detailed inspection findings and maintenance recommendations',
+    icon: CheckCircle,
+    color: 'blue',
+    sections: [
+      'executive_summary',
+      'property_overview',
+      'inspection_findings',
+      'damage_analysis',
+      'maintenance_schedule',
+      'recommendations',
+      'company_profile',
+      'next_steps',
+    ],
+  },
+  {
+    id: 'project-proposal',
+    title: 'Project Proposal',
+    description: 'Professional proposal with timeline and pricing',
+    icon: Target,
+    color: 'green',
+    sections: [
+      'executive_summary',
+      'project_overview',
+      'scope_of_work',
+      'timeline',
+      'materials_overview',
+      'cost_estimates',
+      'company_profile',
+      'testimonials',
+      'next_steps',
+    ],
+  },
+  {
+    id: 'case-study',
+    title: 'Project Case Study',
+    description: 'Before/after showcase with customer success story',
+    icon: Star,
+    color: 'purple',
+    sections: [
+      'executive_summary',
+      'project_overview',
+      'challenges',
+      'solutions',
+      'before_after_gallery',
+      'customer_story',
+      'results',
+      'company_profile',
+      'testimonials',
+    ],
+  },
+];
+
+const buildSectionsForType = (type) => {
+  const selectedType = REPORT_TYPES.find((item) => item.id === type);
+  const activeSections = new Set(selectedType?.sections || []);
+
+  return Object.entries(SECTION_TEMPLATES).reduce((acc, [sectionId, template]) => {
+    acc[sectionId] = {
+      enabled: activeSections.has(sectionId) || Boolean(template.defaultEnabled),
+      aiGenerated: template.aiEnabled ?? false,
+    };
+    return acc;
+  }, {});
+};
 
 const EnhancedReportGenerator = ({ lead: initialLead, businessProfile, onClose, visible = false }) => {
   const navigate = useNavigate();
@@ -132,18 +372,7 @@ const EnhancedReportGenerator = ({ lead: initialLead, businessProfile, onClose, 
   const [reportConfig, setReportConfig] = useState({
     type: 'damage-assessment',
     template: 'professional',
-    sections: {
-      executive_summary: { enabled: true, aiGenerated: true },
-      property_overview: { enabled: true, aiGenerated: false },
-      damage_analysis: { enabled: true, aiGenerated: true },
-      recommendations: { enabled: true, aiGenerated: true },
-      cost_estimates: { enabled: true, aiGenerated: true },
-      before_after_gallery: { enabled: true, aiGenerated: false },
-      customer_story: { enabled: false, aiGenerated: true },
-      testimonials: { enabled: false, aiGenerated: false },
-      company_profile: { enabled: true, aiGenerated: false },
-      next_steps: { enabled: true, aiGenerated: true }
-    },
+    sections: buildSectionsForType('damage-assessment'),
     branding: {
       useCompanyColors: true,
       includeLogo: true,
@@ -223,97 +452,111 @@ const EnhancedReportGenerator = ({ lead: initialLead, businessProfile, onClose, 
     }
   }, [visible, lead]);
 
-  const reportTypes = useMemo(() => [
-    {
-      id: 'damage-assessment',
-      title: 'Roof Damage Assessment',
-      description: 'Comprehensive damage analysis with repair recommendations',
-      icon: AlertCircle,
-      color: 'red',
-      sections: ['executive_summary', 'property_overview', 'damage_analysis', 'recommendations', 'cost_estimates', 'before_after_gallery', 'company_profile', 'next_steps']
-    },
-    {
-      id: 'inspection-report',
-      title: 'Property Inspection Report',
-      description: 'Detailed inspection findings and maintenance recommendations',
-      icon: CheckCircle,
-      color: 'blue',
-      sections: ['executive_summary', 'property_overview', 'inspection_findings', 'recommendations', 'maintenance_schedule', 'company_profile']
-    },
-    {
-      id: 'project-proposal',
-      title: 'Project Proposal',
-      description: 'Professional proposal with timeline and pricing',
-      icon: Target,
-      color: 'green',
-      sections: ['executive_summary', 'scope_of_work', 'timeline', 'cost_estimates', 'materials_overview', 'company_profile', 'testimonials']
-    },
-    {
-      id: 'case-study',
-      title: 'Project Case Study',
-      description: 'Before/after showcase with customer success story',
-      icon: Star,
-      color: 'purple',
-      sections: ['executive_summary', 'project_overview', 'challenges', 'solutions', 'before_after_gallery', 'customer_story', 'results', 'company_profile']
+  useEffect(() => {
+    if (!lead || !businessProfile) {
+      return;
     }
-  ], []);
 
-  const sectionTemplates = useMemo(() => ({
-    executive_summary: {
-      title: 'Executive Summary',
-      description: 'AI-generated overview of findings and recommendations',
-      aiPrompt: 'Create a professional executive summary for a roofing assessment report for {property_address}. Include key findings, severity level, and main recommendations. Keep it concise but compelling for homeowners.',
-      placeholder: 'Our comprehensive assessment of your property has identified several key areas requiring attention...'
-    },
-    damage_analysis: {
-      title: 'Damage Analysis',
-      description: 'Detailed breakdown of identified issues',
-      aiPrompt: 'Generate a detailed damage analysis section for a roof inspection report. Include specific damage types found, their causes, and potential implications if left unaddressed. Use professional yet accessible language.',
-      placeholder: 'Through our thorough inspection, we have identified the following areas of concern...'
-    },
-    recommendations: {
-      title: 'Recommendations',
-      description: 'Prioritized action items and solutions',
-      aiPrompt: 'Create prioritized recommendations for roof repairs based on the damage assessment. Include immediate actions, medium-term maintenance, and preventive measures. Format as a clear action plan.',
-      placeholder: 'Based on our assessment, we recommend the following prioritized actions...'
-    },
-    cost_estimates: {
-      title: 'Cost Estimates',
-      description: 'Transparent pricing breakdown with business profile integration',
-      aiPrompt: 'Generate a professional cost estimates section using the business service data. Include pricing factors, ranges, and value proposition. Integrate actual business pricing when available.',
-      placeholder: 'Investment ranges based on your business profile pricing will be detailed below...'
-    },
-    before_after_gallery: {
-      title: 'Before & After Gallery',
-      description: 'Quality-checked imagery showcase',
-      aiPrompt: null,
-      placeholder: 'High-quality images will be automatically selected and formatted...'
-    },
-    customer_story: {
-      title: 'Customer Success Story',
-      description: 'Relatable before/after experience narrative',
-      aiPrompt: 'Write an engaging customer success story about a similar roofing project. Focus on the customer\'s initial concerns, the solution process, and their satisfaction with results. Make it relatable to {property_type} homeowners.',
-      placeholder: 'Here\'s how we helped the Johnson family transform their home...'
-    },
-    next_steps: {
-      title: 'Next Steps',
-      description: 'Clear path forward for the customer',
-      aiPrompt: 'Create a clear "next steps" section that guides the homeowner through the process of moving forward. Include consultation booking, timeline expectations, and what to expect.',
-      placeholder: 'Ready to move forward? Here\'s what happens next...'
-    }
-  }), []);
+    setAiContent((prev) => {
+      const next = { ...prev };
+      let changed = false;
+
+      if (!next.property_overview) {
+        next.property_overview = composePropertyOverview(lead);
+        changed = true;
+      }
+
+      if (reportConfig.sections.inspection_findings?.enabled && !next.inspection_findings) {
+        next.inspection_findings = composeInspectionFindings(lead);
+        changed = true;
+      }
+
+      if (reportConfig.sections.maintenance_schedule?.enabled && !next.maintenance_schedule) {
+        next.maintenance_schedule = composeMaintenanceSchedule();
+        changed = true;
+      }
+
+      if (!next.company_profile) {
+        next.company_profile = composeCompanyProfile(businessProfile);
+        changed = true;
+      }
+
+      if (!next.testimonials) {
+        const testimonialCopy = composeTestimonials(businessProfile);
+        if (testimonialCopy) {
+          next.testimonials = testimonialCopy;
+          changed = true;
+        }
+      }
+
+      if (reportConfig.sections.scope_of_work?.enabled && !next.scope_of_work) {
+        next.scope_of_work = composeScopeOfWork(reportConfig.type, businessServices);
+        changed = true;
+      }
+
+      if (reportConfig.sections.timeline?.enabled && !next.timeline) {
+        next.timeline = composeTimeline(reportConfig.type);
+        changed = true;
+      }
+
+      if (reportConfig.sections.materials_overview?.enabled && !next.materials_overview) {
+        next.materials_overview = composeMaterialsOverview(businessProfile, businessServices);
+        changed = true;
+      }
+
+      if (reportConfig.sections.project_overview?.enabled && !next.project_overview) {
+        next.project_overview = composeProjectOverview(lead, businessProfile);
+        changed = true;
+      }
+
+      if (reportConfig.sections.challenges?.enabled && !next.challenges) {
+        next.challenges = composeChallenges(lead);
+        changed = true;
+      }
+
+      if (reportConfig.sections.solutions?.enabled && !next.solutions) {
+        next.solutions = composeSolutions(businessProfile);
+        changed = true;
+      }
+
+      if (reportConfig.sections.results?.enabled && !next.results) {
+        next.results = composeResults(businessProfile);
+        changed = true;
+      }
+
+      if (reportConfig.sections.customer_story?.enabled && !next.customer_story) {
+        next.customer_story = composeCustomerStory(lead);
+        changed = true;
+      }
+
+      return changed ? next : prev;
+    });
+  }, [lead, businessProfile, businessServices, reportConfig.type, reportConfig.sections]);
+
+  const reportTypes = REPORT_TYPES;
+
+  const sectionTemplates = SECTION_TEMPLATES;
 
   // Generate AI content for a specific section
-  const generateAIContent = useCallback(async (sectionId, customPrompt = null) => {
+  const generateAIContent = useCallback(async (sectionId, customPrompt = null, options = {}) => {
     if (!sectionTemplates[sectionId]) return;
     
     setAiGenerating(true);
     try {
       const pricingContext = businessServices ? await businessProfileService.getPricingContext(reportConfig.type) : null;
       
-      const prompt = customPrompt || sectionTemplates[sectionId].aiPrompt
+      const basePrompt = sectionTemplates[sectionId].aiPrompt;
+      if (!basePrompt && !customPrompt) {
+        toast.error('This section uses manual copy. Add your own notes instead.');
+        return;
+      }
+
+      const prompt = (customPrompt || basePrompt)
         .replace('{property_address}', lead?.address || 'the property')
-        .replace('{property_type}', lead?.property_type || 'residential');
+        .replace('{property_type}', lead?.property_type || 'residential')
+        .replace('{company_name}', businessProfile?.company?.name || 'your roofing team')
+        .replace('{report_type}', reportConfig.type.replace('-', ' '));
+      const forceRefresh = options.forceRefresh ?? Boolean(customPrompt);
 
       const response = await fetch('/api/v1/reports/generate-content', {
         method: 'POST',
@@ -322,6 +565,7 @@ const EnhancedReportGenerator = ({ lead: initialLead, businessProfile, onClose, 
           prompt,
           section: sectionId,
           lead_id: lead?.id,
+          report_id: reportId,
           context: {
             property_data: lead,
             business_profile: businessProfile,
@@ -329,7 +573,8 @@ const EnhancedReportGenerator = ({ lead: initialLead, businessProfile, onClose, 
             pricing_context: pricingContext,
             validated_images: validatedImages,
             report_type: reportConfig.type
-          }
+          },
+          force_refresh: forceRefresh,
         })
       });
 
@@ -349,7 +594,7 @@ const EnhancedReportGenerator = ({ lead: initialLead, businessProfile, onClose, 
     } finally {
       setAiGenerating(false);
     }
-  }, [lead, businessProfile, reportConfig.type, sectionTemplates, businessServices, validatedImages]);
+  }, [lead, businessProfile, reportConfig.type, sectionTemplates, businessServices, validatedImages, reportId]);
 
   // Initialize report if editing existing
   useEffect(() => {
@@ -459,6 +704,33 @@ const EnhancedReportGenerator = ({ lead: initialLead, businessProfile, onClose, 
     return persistReport({ silent: false });
   }, [persistReport]);
 
+  const renderPdf = useCallback(async () => {
+    if (!lead?.id) {
+      toast.error('Select a lead before generating this report');
+      return;
+    }
+    setLoading(true);
+    try {
+      const saved = await persistReport({ silent: true });
+      const targetId = saved?.id || reportId;
+      if (!targetId) {
+        throw new Error('Report not available');
+      }
+      const response = await fetch(`/api/v1/reports/${targetId}/generate-pdf`, {
+        method: 'POST',
+      });
+      if (!response.ok) {
+        throw new Error('Failed to enqueue PDF rendering');
+      }
+      toast.success('Rendering a polished PDF — view it from the report page shortly.');
+    } catch (error) {
+      console.error('PDF render error:', error);
+      toast.error('Could not start PDF rendering. Save the report and try again.');
+    } finally {
+      setLoading(false);
+    }
+  }, [lead?.id, persistReport, reportId]);
+
   // Generate and send report
   const generateAndSendReport = async () => {
     if (!lead?.id) {
@@ -510,7 +782,11 @@ const EnhancedReportGenerator = ({ lead: initialLead, businessProfile, onClose, 
 
   // Handle report type selection
   const handleReportTypeSelect = (reportType) => {
-    setReportConfig(prev => ({ ...prev, type: reportType }));
+    setReportConfig(prev => ({
+      ...prev,
+      type: reportType,
+      sections: buildSectionsForType(reportType),
+    }));
     setStep('customization');
   };
 
@@ -840,7 +1116,7 @@ const EnhancedReportGenerator = ({ lead: initialLead, businessProfile, onClose, 
                           <div className="flex items-center justify-between mb-2">
                             <span className="text-sm font-medium text-green-800">AI Generated Content</span>
                             <button
-                              onClick={() => generateAIContent(sectionId, aiPrompts[sectionId])}
+                              onClick={() => generateAIContent(sectionId, aiPrompts[sectionId], { forceRefresh: true })}
                               className="text-sm text-green-600 hover:text-green-800"
                             >
                               Regenerate
@@ -906,26 +1182,39 @@ const EnhancedReportGenerator = ({ lead: initialLead, businessProfile, onClose, 
                       {sectionId === 'cost_estimates' && businessServices && (
                         <div className="mt-4 space-y-3">
                           <h5 className="text-sm font-medium text-gray-900">Pricing Integration</h5>
-                          <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-xs">
-                            <div className="p-3 bg-blue-50 border border-blue-200 rounded-lg">
-                              <div className="font-medium text-blue-900">Inspection Services</div>
-                              <div className="text-blue-700 mt-1">
-                                Basic: ${businessServices.inspections?.basic?.price || 150}
+                          {(() => {
+                            const summary = businessServices.summary || {};
+                            const inspections = summary.inspections || {};
+                            const repairs = summary.repairs || {};
+                            const formatPrice = (value) => (value ? `$${Number(value).toLocaleString()}` : '—');
+                            const formatRange = (range) =>
+                              Array.isArray(range) && range.length === 2
+                                ? `${formatPrice(range[0])} - ${formatPrice(range[1])}`
+                                : '—';
+
+                            return (
+                              <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-xs">
+                                <div className="p-3 bg-blue-50 border border-blue-200 rounded-lg">
+                                  <div className="font-medium text-blue-900">Inspection Services</div>
+                                  <div className="text-blue-700 mt-1">
+                                    Basic: {formatPrice(inspections.basic?.price)}
+                                  </div>
+                                  <div className="text-blue-700">
+                                    Comprehensive: {formatPrice(inspections.comprehensive?.price)}
+                                  </div>
+                                </div>
+                                <div className="p-3 bg-green-50 border border-green-200 rounded-lg">
+                                  <div className="font-medium text-green-900">Repair Ranges</div>
+                                  <div className="text-green-700 mt-1">
+                                    Minor: {formatRange(repairs.minor?.priceRange)}
+                                  </div>
+                                  <div className="text-green-700">
+                                    Major: {formatRange(repairs.major?.priceRange)}
+                                  </div>
+                                </div>
                               </div>
-                              <div className="text-blue-700">
-                                Comprehensive: ${businessServices.inspections?.comprehensive?.price || 295}
-                              </div>
-                            </div>
-                            <div className="p-3 bg-green-50 border border-green-200 rounded-lg">
-                              <div className="font-medium text-green-900">Repair Ranges</div>
-                              <div className="text-green-700 mt-1">
-                                Minor: ${businessServices.repairs?.minor?.priceRange?.[0] || 200} - ${businessServices.repairs?.minor?.priceRange?.[1] || 800}
-                              </div>
-                              <div className="text-green-700">
-                                Major: ${businessServices.repairs?.major?.priceRange?.[0] || 3500} - ${businessServices.repairs?.major?.priceRange?.[1] || 15000}
-                              </div>
-                            </div>
-                          </div>
+                            );
+                          })()}
                         </div>
                       )}
                     </div>
@@ -1076,6 +1365,14 @@ const EnhancedReportGenerator = ({ lead: initialLead, businessProfile, onClose, 
                   <span>Save Draft</span>
                 </button>
                 <button
+                  onClick={renderPdf}
+                  disabled={loading || !lead?.id}
+                  className="flex items-center space-x-2 px-4 py-2 text-gray-700 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors disabled:opacity-50"
+                >
+                  {loading ? <Loader className="w-4 h-4 animate-spin" /> : <Download className="w-4 h-4" />}
+                  <span>Render PDF</span>
+                </button>
+                <button
                   onClick={generateAndSendReport}
                   disabled={loading || !lead?.id}
                   className="flex items-center space-x-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50"
@@ -1185,3 +1482,124 @@ const EnhancedReportGenerator = ({ lead: initialLead, businessProfile, onClose, 
 };
 
 export default EnhancedReportGenerator;
+
+// ---------------------------------------------------------------------------
+// Helper functions for default section copy
+// ---------------------------------------------------------------------------
+
+const composePropertyOverview = (lead = {}) => {
+  return [
+    'The property at {{lead.address_full}} anchors a welcoming neighbourhood presence within {{lead.city}}, {{lead.state}}.',
+    'The roof spans {{lead.roof_size_sqft}} square feet with {{lead.roof_material}} surfaces and an estimated age of {{lead.roof_age_years}} years, making this the perfect moment for proactive upgrades.',
+  ].join('\n\n');
+};
+
+const composeInspectionFindings = (lead = {}) => {
+  return [
+    'AI overlays highlight developing wear patterns, including {{lead.ai_analysis.damage_indicators.0}} and {{lead.ai_analysis.damage_indicators.1}}, concentrated on weather-facing slopes.',
+    'Thermal signatures and imagery confidence of {{lead.analysis_confidence}} confirm areas to document during the guided inspection, ensuring decking and flashing remain watertight.',
+  ].join('\n\n');
+};
+
+const composeMaintenanceSchedule = () => {
+  return [
+    'Every spring: clear gutters, inspect fasteners, and refresh sealant around penetrations.',
+    'Each fall: soft wash roof surfaces, verify ventilation, and prepare for winter weather.',
+    'After major storms: request a drone scan or quick inspection to compare against this baseline report.',
+  ].join('\n\n');
+};
+
+const composeCompanyProfile = (businessProfile = {}) => {
+  const company = businessProfile.company || {};
+  return [
+    `${company.name || '{{company.name}}'} is the local, licensed, and insured roofing partner trusted across the community.`,
+    `Homeowners count on us for transparent communication, meticulous cleanup, and premium craftsmanship backed by strong warranties. Call ${company.phone || '{{company.phone}}'} or email ${company.email || '{{company.email}}'} to reserve a consultation.`,
+  ].join(' ');
+};
+
+const composeTestimonials = (businessProfile = {}) => {
+  const testimonials = businessProfile.caseStudies?.testimonials || [];
+  if (!Array.isArray(testimonials) || testimonials.length === 0) {
+    return '';
+  }
+  return testimonials
+    .slice(0, 3)
+    .map((entry) => {
+      const quote = entry.quote?.trim();
+      if (!quote) return null;
+      const name = entry.name || 'Homeowner';
+      return `“${quote}” — ${name}`;
+    })
+    .filter(Boolean)
+    .join('\n\n');
+};
+
+const composeScopeOfWork = (reportType, businessServices) => {
+  const summary = businessServices?.summary || {};
+  const inspections = summary.inspections || {};
+  return [
+    `Complete ${reportType.replace('-', ' ')} featuring tear-off, deck inspection, moisture barrier upgrades, and precision installation of our preferred system.`,
+    `Crews manage staging, protection, and debris haul-off before a final walkthrough. Optional diagnostic inspections (${inspections.comprehensive?.price ? `$${inspections.comprehensive.price}` : 'custom pricing'}) can be layered in when deeper reporting is needed.`,
+  ].join(' ');
+};
+
+const composeTimeline = () => {
+  return [
+    'Day 1: Confirm measurements, materials, and insurance documentation.',
+    'Day 2: Stage crews, protect landscaping, complete tear-off, and prep decking.',
+    'Day 3: Install underlayments, flashings, and primary roof system.',
+    'Day 4: Detail finishing touches, magnetic sweep, and homeowner walkthrough.',
+  ].join('\n\n');
+};
+
+const composeMaterialsOverview = (businessProfile = {}, businessServices) => {
+  const company = businessProfile.company || {};
+  const palette = businessProfile.branding || {};
+  const repairs = businessServices?.summary?.repairs || {};
+  return [
+    `${company.name || '{{company.name}}'} specifies impact-rated shingles, synthetic underlayments, and premium flashing kits to lock in long-term warranties.`,
+    `Finishes lean on ${palette.primaryColor || '{{branding.primaryColor}}'} accents and curated accessories to elevate curb appeal. Optional upgrades cover enhanced ventilation, gutter protection, and designer ridge components.`,
+    repairs.major?.priceRange
+      ? `Comprehensive replacement packages typically invest between $${repairs.major.priceRange[0]} and $${repairs.major.priceRange[1]}, depending on material tier and scope.`
+      : '',
+  ]
+    .filter(Boolean)
+    .join(' ');
+};
+
+const composeProjectOverview = (lead = {}, businessProfile = {}) => {
+  return [
+    'Homeowners at {{lead.address_full}} are focused on safeguarding value, improving curb appeal, and simplifying insurance documentation.',
+    'Our turnkey plan pairs expert installation with proactive communication so everything stays on schedule and on budget.',
+  ].join(' ');
+};
+
+const composeChallenges = (lead = {}) => {
+  return [
+    'Steep pitches and tight driveway access require thoughtful material staging and safety tie-offs.',
+    'Regional weather windows can close quickly, so rapid dry-in and contingency scheduling keep the project on track.',
+  ].join('\n\n');
+};
+
+const composeSolutions = (businessProfile = {}) => {
+  const company = businessProfile.company || {};
+  return [
+    `${company.name || '{{company.name}}'} deploys specialised crews with certified safety anchors, just-in-time deliveries, and neighbour-friendly site management.`,
+    'We coordinate dumpsters, protective coverings, and daily progress updates so the experience stays frictionless.',
+  ].join(' ');
+};
+
+const composeResults = (businessProfile = {}) => {
+  const company = businessProfile.company || {};
+  return [
+    'The finished project delivers a refreshed exterior, stronger resale story, and documentation that satisfies insurance carriers.',
+    `${company.name || '{{company.name}}'} finalises warranty registration, schedules follow-up check-ins, and stands ready for future service calls.`,
+  ].join(' ');
+};
+
+const composeCustomerStory = (lead = {}) => {
+  return [
+    '{{lead.homeowner_name}} wanted a contractor that handled claim paperwork, kept crews tidy, and finished ahead of schedule.',
+    'We coordinated approvals, staged the project with minimal disruption, and left the property spotless—earning a confident referral to the neighbours.',
+  ].join(' ');
+};

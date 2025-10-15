@@ -6,6 +6,7 @@ from collections import Counter
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Tuple
+from types import SimpleNamespace
 
 from sqlalchemy.orm import Session
 
@@ -57,6 +58,7 @@ class CandidateProcessingResult:
     quality_score: float
     quality_status: str
     cached_flags: Dict[str, bool]
+    activity: LeadActivity
 
 
 class LeadScoringEngine:
@@ -361,6 +363,126 @@ class LeadGenerationService:
                     contact_enricher.aclose(),
                 )
 
+    async def generate_manual_lead(
+        self,
+        user_id: int,
+        *,
+        address_line1: str,
+        address_line2: Optional[str] = None,
+        city: Optional[str] = None,
+        state: Optional[str] = None,
+        postal_code: Optional[str] = None,
+        latitude: Optional[float] = None,
+        longitude: Optional[float] = None,
+        include_street_view: bool = True,
+    ) -> CandidateProcessingResult:
+        """Process a single address outside the bulk area scan workflow."""
+
+        if not address_line1 or not address_line1.strip():
+            raise ValueError("Address line 1 is required")
+
+        base_line = address_line1.strip()
+        if address_line2 and address_line2.strip():
+            base_line = f"{base_line}, {address_line2.strip()}"
+
+        resolved_city = city.strip() if city else None
+        resolved_state = state.strip() if state else None
+        resolved_postal = postal_code.strip() if postal_code else None
+        resolved_lat = latitude
+        resolved_lon = longitude
+
+        components: List[str] = [base_line]
+        locality = ", ".join(part for part in [resolved_city, resolved_state, resolved_postal] if part)
+        if locality:
+            components.append(locality)
+        full_address = ", ".join(filter(None, components))
+
+        discovery: Optional[PropertyDiscoveryService] = None
+        discovery_candidates: List[PropertyCandidate] = []
+        if resolved_lat is None or resolved_lon is None:
+            discovery = PropertyDiscoveryService()
+            try:
+                query = full_address if full_address else base_line
+                discovery_candidates = await discovery.discover(query, limit=5)
+            finally:
+                await discovery.aclose()
+
+            if not discovery_candidates:
+                raise ValueError("Unable to geocode the supplied address")
+
+            target_city = (resolved_city or "").lower()
+            target_state = (resolved_state or "").lower()
+            target_postal = (resolved_postal or "").replace(" ", "")
+            best_candidate = None
+            best_score = -1
+            for item in discovery_candidates:
+                score = 0
+                if target_city and item.city and item.city.lower() == target_city:
+                    score += 3
+                if target_state and item.state and item.state.lower() == target_state:
+                    score += 2
+                if target_postal and item.postal_code and item.postal_code.replace(" ", "") == target_postal:
+                    score += 4
+                if score > best_score:
+                    best_score = score
+                    best_candidate = item
+            candidate_match = best_candidate or discovery_candidates[0]
+            resolved_lat = candidate_match.latitude
+            resolved_lon = candidate_match.longitude
+            resolved_city = resolved_city or candidate_match.city
+            resolved_state = resolved_state or candidate_match.state
+            resolved_postal = resolved_postal or candidate_match.postal_code
+            if not full_address or not locality:
+                components = [base_line]
+                locality = ", ".join(
+                    part for part in [candidate_match.city, candidate_match.state, candidate_match.postal_code] if part
+                )
+                if locality:
+                    components.append(locality)
+                full_address = ", ".join(filter(None, components))
+
+        if resolved_lat is None or resolved_lon is None:
+            raise ValueError("The address is missing latitude/longitude coordinates")
+
+        candidate = PropertyCandidate(
+            address=full_address,
+            city=resolved_city,
+            state=resolved_state,
+            postal_code=resolved_postal,
+            latitude=resolved_lat,
+            longitude=resolved_lon,
+            source="manual_lookup",
+        )
+
+        area_stub = SimpleNamespace(id=None, user_id=user_id)
+        pipeline = EnhancedRoofAnalysisPipeline()
+        property_enricher = PropertyEnrichmentService()
+        contact_enricher = ContactEnrichmentService()
+        cache_repo = EnrichmentCacheRepository(self.db)
+
+        try:
+            result = await self._process_candidate(
+                area_stub,
+                candidate,
+                pipeline,
+                property_enricher,
+                contact_enricher,
+                cache_repo,
+                enable_street_view=include_street_view,
+                min_score_override=0.0,
+            )
+        finally:
+            await asyncio.gather(
+                pipeline.aclose(),
+                property_enricher.aclose(),
+                contact_enricher.aclose(),
+            )
+
+        if result is None:
+            raise ValueError("Unable to generate a qualified lead for the supplied address")
+
+        return result
+
     async def _process_candidate(
         self,
         area_scan: AreaScan,
@@ -369,6 +491,9 @@ class LeadGenerationService:
         property_enricher: PropertyEnrichmentService,
         contact_enricher: ContactEnrichmentService,
         cache_repo: EnrichmentCacheRepository,
+        *,
+        enable_street_view: bool = True,
+        min_score_override: Optional[float] = None,
     ) -> Optional[CandidateProcessingResult]:
         address_key = canonical_address_key(
             candidate.address,
@@ -396,7 +521,7 @@ class LeadGenerationService:
             latitude=candidate.latitude,
             longitude=candidate.longitude,
             property_profile=property_profile,
-            enable_street_view=True,
+            enable_street_view=enable_street_view,
         )
         analysis = enhanced_result.roof_analysis
 
@@ -432,7 +557,8 @@ class LeadGenerationService:
             contact_profile.email = None
 
         score_result = self.scoring_engine.score(analysis, property_profile, contact_profile)
-        if score_result.score < settings.min_lead_score:
+        score_threshold = settings.min_lead_score if min_score_override is None else min_score_override
+        if score_result.score < score_threshold:
             return None
 
         street_assets = enhanced_result.street_view_assets
@@ -614,15 +740,21 @@ class LeadGenerationService:
             "cached": cached_flags,
         }
 
+        activity_prefix = "manual" if candidate.source == "manual_lookup" else "scan"
+        if candidate.source == "manual_lookup":
+            activity_title = "Lead updated via manual lookup" if merged else "Manual SmartScan lead"
+        else:
+            activity_title = "Lead updated via dedupe merge" if merged else "New AI-qualified lead"
         activity = LeadActivity(
             lead_id=lead.id,
             user_id=area_scan.user_id,
-            activity_type="scan_lead_merged" if merged else "scan_lead_created",
-            title="Lead updated via dedupe merge" if merged else "New AI-qualified lead",
+            activity_type=f"{activity_prefix}_lead_merged" if merged else f"{activity_prefix}_lead_created",
+            title=activity_title,
             description=analysis.summary,
             metadata=activity_metadata,
         )
         self.db.add(activity)
+        self.db.flush()
 
         return CandidateProcessingResult(
             lead=lead,
@@ -635,6 +767,7 @@ class LeadGenerationService:
             quality_score=quality_score,
             quality_status=quality_status,
             cached_flags=cached_flags,
+            activity=activity,
         )
 
 

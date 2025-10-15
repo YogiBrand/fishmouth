@@ -3,9 +3,10 @@ import { useParams, useNavigate } from 'react-router-dom';
 import {
   ArrowLeft, Edit3, Save, Download, Send,
   Loader, Copy, FileText, Sparkles, MessageSquare,
-  CheckCircle, AlertCircle, DollarSign, Home,
+  CheckCircle, AlertCircle, AlertTriangle, DollarSign, Home,
   Camera, Award, Target, Printer, Mail, Smartphone,
-  X
+  ClipboardList, Calendar, ListChecks, Layers, Lightbulb,
+  Trophy, Clock3, X
 } from 'lucide-react';
 import html2canvas from 'html2canvas';
 import jsPDF from 'jspdf';
@@ -437,10 +438,19 @@ const ReportPage = () => {
     executive_summary: FileText,
     property_overview: Home,
     damage_analysis: AlertCircle,
+    inspection_findings: ClipboardList,
     recommendations: CheckCircle,
+    maintenance_schedule: Calendar,
     cost_estimates: DollarSign,
     before_after_gallery: Camera,
     customer_story: MessageSquare,
+    scope_of_work: ListChecks,
+    timeline: Clock3,
+    materials_overview: Layers,
+    project_overview: Target,
+    challenges: AlertTriangle,
+    solutions: Lightbulb,
+    results: Trophy,
     company_profile: Award,
     next_steps: Target
   };

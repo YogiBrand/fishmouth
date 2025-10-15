@@ -698,6 +698,40 @@ def _ensure_schema() -> None:
             connection.execute(text("CREATE INDEX IF NOT EXISTS ix_message_events_type ON message_events (type)"))
             connection.execute(text("CREATE UNIQUE INDEX IF NOT EXISTS ix_public_shares_token ON public_shares (token)"))
 
+    # -------------------- Contractors optional columns --------------------
+    if "contractors" in tables:
+        existing_contractors = {column["name"] for column in inspector.get_columns("contractors")}
+        def _json_type() -> str:
+            return "JSONB" if engine.dialect.name == "postgresql" else "JSON"
+        contractor_columns = {
+            "services_config": f"ALTER TABLE contractors ADD COLUMN services_config {_json_type()}",
+            "service_areas": f"ALTER TABLE contractors ADD COLUMN service_areas {_json_type()}",
+            "offers_packages": f"ALTER TABLE contractors ADD COLUMN offers_packages {_json_type()}",
+            "content_library": f"ALTER TABLE contractors ADD COLUMN content_library {_json_type()}",
+            "completeness": f"ALTER TABLE contractors ADD COLUMN completeness {_json_type()}",
+            "pricing_suggestions": f"ALTER TABLE contractors ADD COLUMN pricing_suggestions {_json_type()}",
+            "autofill_status": "ALTER TABLE contractors ADD COLUMN autofill_status VARCHAR(32)",
+            "last_scraped_at": (
+                "ALTER TABLE contractors ADD COLUMN last_scraped_at TIMESTAMP"
+                if engine.dialect.name != "sqlite"
+                else "ALTER TABLE contractors ADD COLUMN last_scraped_at DATETIME"
+            ),
+        }
+        with engine.begin() as connection:
+            for column_name, ddl in contractor_columns.items():
+                if column_name not in existing_contractors:
+                    connection.execute(text(ddl))
+
+    if "ai_generations" in tables:
+        existing_ai_cols = {column["name"] for column in inspector.get_columns("ai_generations")}
+        with engine.begin() as connection:
+            if "prompt_signature" not in existing_ai_cols:
+                connection.execute(text("ALTER TABLE ai_generations ADD COLUMN prompt_signature TEXT"))
+            if "generation_time_ms" not in existing_ai_cols:
+                connection.execute(text("ALTER TABLE ai_generations ADD COLUMN generation_time_ms INTEGER"))
+            if "tokens_used" not in existing_ai_cols:
+                connection.execute(text("ALTER TABLE ai_generations ADD COLUMN tokens_used INTEGER"))
+
     if "marketing_signups" not in tables:
         with engine.begin() as connection:
             if engine.dialect.name == "sqlite":

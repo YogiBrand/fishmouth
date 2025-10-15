@@ -14,10 +14,12 @@ import {
   Layers,
   Loader2,
   MapPin,
+  Filter,
   RefreshCw,
   ShieldCheck,
   Trash2,
   Flame,
+  ClipboardList,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 
@@ -205,7 +207,32 @@ const defaultEnrichment = {
   aiNarratives: true,
 };
 
-const steps = ['Area', 'Providers', 'Filters', 'Review'];
+const steps = [
+  {
+    id: 'area',
+    label: 'Area',
+    description: 'Define polygons, center radius, or bounding boxes to target the footprint.',
+    icon: MapPin,
+  },
+  {
+    id: 'providers',
+    label: 'Providers',
+    description: 'Stack imagery sources, adjust spacing, and preview tile budgets.',
+    icon: Layers,
+  },
+  {
+    id: 'filters',
+    label: 'Filters',
+    description: 'Tune roof age, value, and enrichment options before processing.',
+    icon: Filter,
+  },
+  {
+    id: 'review',
+    label: 'Review',
+    description: 'Review settings, confirm spend, and launch the SmartScan.',
+    icon: ClipboardList,
+  },
+];
 
 const initialViewState = {
   latitude: 30.2672,
@@ -220,7 +247,7 @@ const formatCurrency = (value) => {
   return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(value);
 };
 
-const ScanWizard = ({ onScanCreated, onClustersGenerated, isDark = false }) => {
+const ScanWizard = ({ onScanCreated, onClustersGenerated, isDark = false, onStepChange }) => {
   const [activeStep, setActiveStep] = useState(0);
   const [areaType, setAreaType] = useState('polygon');
   const [polygonPoints, setPolygonPoints] = useState([]);
@@ -239,7 +266,10 @@ const ScanWizard = ({ onScanCreated, onClustersGenerated, isDark = false }) => {
   const [jobResults, setJobResults] = useState(null);
   const [isPolling, setIsPolling] = useState(false);
   const pollingRef = useRef(null);
-  const [searchTerm, setSearchTerm] = useState('Austin, TX');
+  const [searchTerm, setSearchTerm] = useState('');
+  const [searchCity, setSearchCity] = useState('');
+  const [searchState, setSearchState] = useState('');
+  const [searchPostal, setSearchPostal] = useState('');
   const [viewState, setViewState] = useState(initialViewState);
   const mapRef = useRef(null);
   const [centerPoint, setCenterPoint] = useState(null);
@@ -492,15 +522,42 @@ const ScanWizard = ({ onScanCreated, onClustersGenerated, isDark = false }) => {
     return false;
   }, [activeStep, areaType, polygonPointsSafe.length, providerPolicy.order.length]);
 
+  const notifyStepChange = useCallback(
+    (value) => {
+      if (typeof onStepChange === 'function') {
+        onStepChange(value);
+      }
+    },
+    [onStepChange]
+  );
+
+  useEffect(() => {
+    notifyStepChange(activeStep);
+  }, [activeStep, notifyStepChange]);
+
+  const updateActiveStep = useCallback(
+    (updater) => {
+      setActiveStep((prev) => {
+        const nextRaw = typeof updater === 'function' ? updater(prev) : updater;
+        const next = Math.max(0, Math.min(steps.length - 1, nextRaw));
+        if (next !== prev) {
+          notifyStepChange(next);
+        }
+        return next;
+      });
+    },
+    [notifyStepChange]
+  );
+
   const handleAdvance = () => {
     if (activeStep < steps.length - 1) {
-      setActiveStep((prev) => prev + 1);
+      updateActiveStep((prev) => prev + 1);
     }
   };
 
   const handleBack = () => {
     if (activeStep > 0) {
-      setActiveStep((prev) => prev - 1);
+      updateActiveStep((prev) => prev - 1);
     }
   };
 
@@ -580,29 +637,67 @@ const ScanWizard = ({ onScanCreated, onClustersGenerated, isDark = false }) => {
 
   const handleSearchSubmit = async (event) => {
     event.preventDefault();
-    if (!searchTerm.trim()) return;
-    if (!MAPBOX_TOKEN) {
-      toast.error('Mapbox token is missing. Set REACT_APP_MAPBOX_TOKEN to enable search.');
+    const trimmedCity = searchCity.trim();
+    const trimmedState = searchState.trim();
+    const trimmedPostal = searchPostal.trim();
+    const trimmedCustom = searchTerm.trim();
+
+    const locationParts = [
+      trimmedCustom,
+      [trimmedCity, trimmedState].filter(Boolean).join(', '),
+      trimmedPostal,
+    ]
+      .map((part) => part.trim())
+      .filter(Boolean);
+
+    const finalTerm = locationParts.join(', ').trim();
+
+    if (!finalTerm) {
+      toast.error('Enter city/state/ZIP or provide a custom query.');
       return;
     }
+
     try {
       const response = await fetch(
-        `https://api.mapbox.com/geocoding/v5/mapbox.places/${encodeURIComponent(searchTerm)}.json?limit=1&access_token=${MAPBOX_TOKEN}`
+        `https://nominatim.openstreetmap.org/search?format=json&addressdetails=1&limit=1&q=${encodeURIComponent(finalTerm)}`,
+        {
+          headers: {
+            'Accept': 'application/json',
+            'User-Agent': 'FishmouthScanner/1.0 (+https://fishmouth.ai)',
+          },
+        }
       );
-      const data = await response.json();
-      const feature = data.features?.[0];
-      if (!feature) {
+      if (!response.ok) {
+        throw new Error(`Nominatim error ${response.status}`);
+      }
+      const results = await response.json();
+      const match = Array.isArray(results) ? results[0] : null;
+      if (!match) {
         toast.error('Location not found');
         return;
       }
-      const [lon, lat] = feature.center;
+      const lat = parseFloat(match.lat);
+      const lon = parseFloat(match.lon);
+      if (!Number.isFinite(lat) || !Number.isFinite(lon)) {
+        toast.error('Invalid location result');
+        return;
+      }
       const currentZoom = Number.isFinite(viewState?.zoom) ? viewState.zoom : initialViewState.zoom;
       const minimumZoom = areaType === 'center' ? 13 : 11;
       const targetZoom = Number.isFinite(currentZoom) ? Math.max(currentZoom, minimumZoom) : minimumZoom;
       moveMapTo(lat, lon, { zoom: targetZoom });
       if (areaType === 'bbox') {
-        const bboxData = feature.bbox || [lon - 0.05, lat - 0.05, lon + 0.05, lat + 0.05];
-        setBbox({ minLon: bboxData[0], minLat: bboxData[1], maxLon: bboxData[2], maxLat: bboxData[3] });
+        const bboxData = match.boundingbox
+          ? [
+              parseFloat(match.boundingbox[2]),
+              parseFloat(match.boundingbox[0]),
+              parseFloat(match.boundingbox[3]),
+              parseFloat(match.boundingbox[1]),
+            ]
+          : [lon - 0.05, lat - 0.05, lon + 0.05, lat + 0.05];
+        if (bboxData.every((value) => Number.isFinite(value))) {
+          setBbox({ minLon: bboxData[0], minLat: bboxData[1], maxLon: bboxData[2], maxLat: bboxData[3] });
+        }
       }
       if (areaType === 'center') {
         setCenterPoint({
@@ -610,7 +705,7 @@ const ScanWizard = ({ onScanCreated, onClustersGenerated, isDark = false }) => {
           longitude: parseFloat(lon.toFixed(6)),
         });
       }
-      toast.success(`Centered map on ${feature.place_name}`);
+      toast.success(`Centered map on ${match.display_name}`);
     } catch (error) {
       console.error('Failed to search location', error);
       toast.error('Unable to search location right now');
@@ -977,40 +1072,80 @@ const ScanWizard = ({ onScanCreated, onClustersGenerated, isDark = false }) => {
             </div>
 
             <div className={`space-y-4 ${isDark ? 'text-slate-200' : 'text-gray-700'}`}>
-              <form onSubmit={handleSearchSubmit} className="space-y-3">
-                <label className="text-sm font-medium block">Search ZIP, city, or county</label>
-                <div className="flex gap-2">
-                  <input
-                    type="text"
-                    value={searchTerm}
-                    onChange={(event) => setSearchTerm(event.target.value)}
-                    className={`flex-1 rounded-lg border px-3 py-2 text-sm ${
-                      isDark ? 'border-slate-700 bg-slate-900 text-slate-100' : 'border-gray-300 bg-white text-gray-900'
-                    }`}
-                    placeholder="e.g. Travis County, TX"
-                  />
+              <form onSubmit={handleSearchSubmit} className="space-y-4">
+                <div className="space-y-3">
+                  <p className={`text-xs ${isDark ? 'text-slate-400' : 'text-gray-600'}`}>
+                    Enter location details or use the quick actions to position the map.
+                  </p>
+                  <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                    <label className="flex flex-col gap-1">
+                      <span className={`text-xs font-semibold uppercase tracking-wide ${isDark ? 'text-slate-400' : 'text-gray-500'}`}>City</span>
+                      <input
+                        type="text"
+                        value={searchCity}
+                        onChange={(event) => setSearchCity(event.target.value)}
+                        placeholder="Austin"
+                        autoComplete="address-level2"
+                        className={`rounded-lg border px-3 py-2 text-sm ${isDark ? 'border-slate-700 bg-slate-900 text-slate-100 placeholder:text-slate-500' : 'border-gray-300 bg-white text-gray-900 placeholder:text-gray-400'}`}
+                      />
+                    </label>
+                    <label className="flex flex-col gap-1">
+                      <span className={`text-xs font-semibold uppercase tracking-wide ${isDark ? 'text-slate-400' : 'text-gray-500'}`}>State</span>
+                      <input
+                        type="text"
+                        value={searchState}
+                        onChange={(event) => setSearchState(event.target.value)}
+                        placeholder="TX"
+                        autoComplete="address-level1"
+                        className={`rounded-lg border px-3 py-2 text-sm ${isDark ? 'border-slate-700 bg-slate-900 text-slate-100 placeholder:text-slate-500' : 'border-gray-300 bg-white text-gray-900 placeholder:text-gray-400'}`}
+                      />
+                    </label>
+                    <label className="flex flex-col gap-1">
+                      <span className={`text-xs font-semibold uppercase tracking-wide ${isDark ? 'text-slate-400' : 'text-gray-500'}`}>ZIP / Postal</span>
+                      <input
+                        type="text"
+                        value={searchPostal}
+                        onChange={(event) => setSearchPostal(event.target.value)}
+                        placeholder="78701"
+                        autoComplete="postal-code"
+                        className={`rounded-lg border px-3 py-2 text-sm ${isDark ? 'border-slate-700 bg-slate-900 text-slate-100 placeholder:text-slate-500' : 'border-gray-300 bg-white text-gray-900 placeholder:text-gray-400'}`}
+                      />
+                    </label>
+                    <label className="flex flex-col gap-1 sm:col-span-2 lg:col-span-3">
+                      <span className={`text-xs font-semibold uppercase tracking-wide ${isDark ? 'text-slate-400' : 'text-gray-500'}`}>
+                        Custom query (optional)
+                      </span>
+                      <input
+                        type="text"
+                        value={searchTerm}
+                        onChange={(event) => setSearchTerm(event.target.value)}
+                        placeholder="Austin, TX"
+                        className={`rounded-lg border px-3 py-2 text-sm ${isDark ? 'border-slate-700 bg-slate-900 text-slate-100 placeholder:text-slate-500' : 'border-gray-300 bg-white text-gray-900 placeholder:text-gray-400'}`}
+                      />
+                    </label>
+                  </div>
+                </div>
+                <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
                   <button
                     type="submit"
-                    className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-3 py-2 text-sm font-medium text-white hover:bg-blue-700"
+                    className="inline-flex w-full items-center justify-center gap-2 rounded-lg bg-blue-600 px-3 py-2 text-sm font-medium text-white hover:bg-blue-700 sm:w-auto"
                   >
-                    <RefreshCw size={16} /> Center map
+                    <RefreshCw size={16} /> Search &amp; center
                   </button>
                   <button
                     type="button"
                     onClick={handleLocateMe}
                     disabled={isLocating}
-                    className={`inline-flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium transition-colors ${
-                      isLocating
-                        ? 'cursor-wait bg-slate-200 text-slate-500'
-                        : 'bg-slate-800 text-white hover:bg-slate-700'
+                    className={`inline-flex w-full items-center justify-center gap-2 rounded-lg px-3 py-2 text-sm font-medium transition-colors sm:w-auto ${
+                      isLocating ? 'cursor-wait bg-slate-200 text-slate-500' : 'bg-slate-800 text-white hover:bg-slate-700'
                     }`}
                   >
                     {isLocating ? <Loader2 size={16} className="animate-spin" /> : <LocateFixed size={16} />}
                     {isLocating ? 'Locating…' : 'Find my location'}
                   </button>
                 </div>
-                <p className="text-xs text-gray-500">
-                  We will center the map on the first matching result. Drawing polygons uses the current view for accurate tiles. Granting location access switches to the center-point workflow automatically.
+                <p className={`text-xs ${isDark ? 'text-slate-400' : 'text-gray-500'}`}>
+                  We will center the map on the best match. Drawing polygons uses the current view for accurate tiles.
                 </p>
               </form>
 
@@ -1367,29 +1502,51 @@ const ScanWizard = ({ onScanCreated, onClustersGenerated, isDark = false }) => {
         </p>
       </header>
 
-      <div className="flex flex-wrap items-center gap-3 text-sm">
+      <ol className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
         {steps.map((step, index) => {
+          const Icon = step.icon;
           const isActive = index === activeStep;
-          const isComplete = index < activeStep;
+          const cardClass = isActive
+            ? isDark
+              ? 'border-blue-500/40 bg-blue-500/20 text-blue-100'
+              : 'border-blue-200 bg-blue-50 text-blue-700'
+            : isDark
+            ? 'border-slate-800 bg-slate-900/60 text-slate-300'
+            : 'border-slate-200 bg-white text-slate-600';
+          const iconWrapperClass = isActive
+            ? isDark
+              ? 'border-blue-400/40 bg-blue-500/25 text-blue-100'
+              : 'border-blue-200 bg-white text-blue-600'
+            : isDark
+            ? 'border-slate-700 bg-slate-900 text-slate-400'
+            : 'border-slate-200 bg-slate-50 text-slate-400';
+          const badgeClass = isActive
+            ? isDark
+              ? 'bg-blue-500 text-white'
+              : 'bg-blue-600 text-white'
+            : isDark
+            ? 'bg-slate-700 text-slate-200'
+            : 'bg-slate-300 text-slate-700';
           return (
-            <div key={step} className="flex items-center gap-2">
-              <div
-                className={`flex h-8 w-8 items-center justify-center rounded-full text-sm font-semibold ${
-                  isActive
-                    ? 'bg-blue-600 text-white'
-                    : isComplete
-                    ? 'bg-emerald-500 text-white'
-                    : 'bg-gray-200 text-gray-600'
-                }`}
-              >
-                {isComplete ? <CheckCircle size={16} /> : index + 1}
+            <li key={step.id} className={`flex items-start gap-3 rounded-2xl border px-4 py-3 ${cardClass}`}>
+              <div className="relative mt-0.5">
+                <div className={`flex h-9 w-9 items-center justify-center rounded-xl border ${iconWrapperClass}`}>
+                  <Icon className="h-4 w-4" />
+                </div>
+                <span className={`absolute -top-2 -left-2 inline-flex h-5 w-5 items-center justify-center rounded-full text-[10px] font-semibold ${badgeClass}`}>
+                  {index + 1}
+                </span>
               </div>
-              <span className={`${isActive ? 'font-semibold text-blue-600' : isDark ? 'text-slate-300' : 'text-gray-700'}`}>{step}</span>
-              {index < steps.length - 1 && <span className="text-gray-400">/</span>}
-            </div>
+              <div>
+                <p className={`text-sm font-semibold ${isActive ? (isDark ? 'text-slate-100' : 'text-gray-900') : isDark ? 'text-slate-200' : 'text-gray-700'}`}>
+                  {step.label}
+                </p>
+                <p className={`text-xs ${isDark ? 'text-slate-400' : 'text-gray-500'}`}>{step.description}</p>
+              </div>
+            </li>
           );
         })}
-      </div>
+      </ol>
 
       <div className="rounded-3xl border border-gray-200 bg-white p-6 shadow-sm">
         {renderStep()}

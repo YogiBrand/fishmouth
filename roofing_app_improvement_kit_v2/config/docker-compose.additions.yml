@@ -1,0 +1,23 @@
+# overlay additions (extended)
+services:
+  address_lookup_8022:
+    build: ./code-starters/address_lookup
+    ports: ["8022:8022"]
+  ai_gateway_8023:
+    build: ./code-starters/ai_gateway
+    ports: ["8023:8023"]
+  vision_ai_8024:
+    build: ./code-starters/vision_ai
+    ports: ["8024:8024"]
+  mapping_intel_8025:
+    build: ./code-starters/mapping_intel
+    ports: ["8025:8025"]
+  quality_engine_8026:
+    build: ./code-starters/quality_engine
+    ports: ["8026:8026"]
+  osint_contacts_8027:
+    build: ./code-starters/osint_contacts
+    ports: ["8027:8027"]
+  event_monitor_8028:
+    build: ./code-starters/event_monitor
+    ports: ["8028:8028"]

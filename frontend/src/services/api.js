@@ -706,6 +706,60 @@ export const leadAPI = {
   },
 
   // Lead Management
+  createManualLead: async (payload) => {
+    try {
+      const response = await api.post('/api/leads/manual', payload);
+      return response.data;
+    } catch (error) {
+      assertMocksEnabled(error);
+      console.log('Using mock manual lead creation');
+      const timestamp = Date.now();
+      const mockBase = normalizeMockLead(mockLeads[0]) || {};
+      const addressLine = [payload.address_line1, payload.address_line2].filter(Boolean).join(', ');
+      const composedAddress = [addressLine, payload.city, payload.state, payload.postal_code].filter(Boolean).join(', ');
+      const fallbackLead = {
+        ...mockBase,
+        id: timestamp,
+        address: addressLine || mockBase.address || '123 Demo Street',
+        city: payload.city || mockBase.city || 'Austin',
+        state: payload.state || mockBase.state || 'TX',
+        zip_code: payload.postal_code || mockBase.zip_code || '78701',
+        lead_score: 82,
+        priority: 'hot',
+        damage_indicators: ['hail_damage', 'loose_flashing'],
+        discovery_status: 'manual_lookup',
+        tags: ['manual_add', ...(payload.tags || [])],
+        created_at: new Date().toISOString(),
+      };
+      const summary = {
+        address: composedAddress || fallbackLead.address,
+        lead_score: fallbackLead.lead_score,
+        priority: fallbackLead.priority,
+        quality_status: 'passed',
+        roof_age_years: fallbackLead.roof_age_years || 17,
+        analysis_summary: 'AI detected hail bruising on the north slope and recommends proactive mitigation.',
+        replacement_urgency: 'urgent',
+        damage_indicators: fallbackLead.damage_indicators,
+        imagery_source: 'synthetic',
+        contact_confidence: 0.78,
+        property_value: fallbackLead.property_value || 450000,
+        deliverables: payload.deliverables || {},
+        content_tier: payload?.preferences?.content_tier || 'premium',
+        street_view_requested: payload?.preferences?.include_street_view ?? true,
+      };
+      return {
+        lead: fallbackLead,
+        summary,
+        next_actions: [
+          'Enroll in AI follow-up sequence for immediate outreach.',
+          'Send premium homeowner dossier with hail findings.',
+          'Schedule field inspection within 72 hours.',
+        ],
+        activity_id: `mock-${timestamp}`,
+      };
+    }
+  },
+
   getLeads: async (filters = {}) => {
     try {
       const params = new URLSearchParams();

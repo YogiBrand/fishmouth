@@ -1,0 +1,1 @@
+Analyze roof damage given {satellite_results}, {property_age}, {storm_events}, {permit_data}. Name specific issues and severities, likely causes, and insurance relevance. Produce concise owner‑friendly prose and a bullet summary.

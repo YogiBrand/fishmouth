@@ -5,6 +5,12 @@
 **Status:** The application is live and accessible  
 **Frontend:** Running on port 3000  
 **Backend:** Running on port 8000  
+**Admin UI (Vite dev server):** Running on port 5173  
+**Admin API:** Running on port 8031  
+**Telemetry Gateway:** Running on port 8030  
+**Billing Gateway:** Running on port 8032  
+**Tileserver / Imagery:** Running on ports 8080 (tiles) and 8081 (titiler)  
+**Grafana (Observability):** Running on port 3001  
 
 ---
 
@@ -19,7 +25,14 @@ http://localhost:3000
 ### **Method 2: Using Server IP (If running on remote server)**
 If the Docker containers are running on a remote Linux server:
 ```
-http://[SERVER_IP]:3000
+http://[SERVER_IP]:3000        # marketing app
+http://[SERVER_IP]:5173        # admin UI dev server
+http://[SERVER_IP]:8031        # admin API
+http://[SERVER_IP]:8030        # telemetry gateway
+http://[SERVER_IP]:8032        # billing gateway
+http://[SERVER_IP]:8080        # tileserver-gl
+http://[SERVER_IP]:8081        # titiler imagery
+http://[SERVER_IP]:3001        # grafana dashboards
 ```
 Replace `[SERVER_IP]` with your actual server IP address.
 
@@ -27,6 +40,42 @@ Replace `[SERVER_IP]` with your actual server IP address.
 ```
 http://127.0.0.1:3000
 ```
+
+To reach the admin stack through SSH tunnelling (recommended):
+
+```
+ssh -L 3000:localhost:3000 \
+    -L 5173:localhost:5173 \
+    -L 8031:localhost:8031 \
+    -L 8030:localhost:8030 \
+    -L 8032:localhost:8032 \
+    -L 8080:localhost:8080 \
+    -L 8081:localhost:8081 \
+    -L 3001:localhost:3001 \
+    yogi@[SERVER_IP]
+```
+
+After connecting, visit `http://localhost:5173` (admin UI), `http://localhost:8031` (admin API), etc., directly from your MacBook.
+
+### **SSH Config Shortcut**
+
+Add the following block to `~/.ssh/config` on your MacBook to make the forwards automatic:
+
+```
+Host fishmouth
+    HostName [SERVER_IP]
+    User yogi
+    LocalForward 3000 localhost:3000
+    LocalForward 5173 localhost:5173
+    LocalForward 8031 localhost:8031
+    LocalForward 8030 localhost:8030
+    LocalForward 8032 localhost:8032
+    LocalForward 8080 localhost:8080
+    LocalForward 8081 localhost:8081
+    LocalForward 3001 localhost:3001
+```
+
+Then connect with `ssh fishmouth` and all ports will map through automatically.
 
 ---
 

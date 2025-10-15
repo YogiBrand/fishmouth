@@ -1,0 +1,80 @@
+# docker-compose.additions.yml (overlay for domain services)
+services:
+  address_lookup_8022:
+    build:
+      context: ./services/address-8022
+    environment:
+      TELEMETRY_URL: ${TELEMETRY_URL}
+      MAPILLARY_TOKEN: ${MAPILLARY_TOKEN:-}
+      ORS_API_KEY: ${ORS_API_KEY:-}
+    depends_on:
+      telemetry_gw_8030:
+        condition: service_started
+    ports: ["8022:8022"]
+
+  ai_gateway_8023:
+    build:
+      context: ./services/ai-gateway-8023
+    environment:
+      OPENROUTER_API_KEY: ${OPENROUTER_API_KEY}
+      TELEMETRY_URL: ${TELEMETRY_URL}
+      AI_MAX_RPM: ${AI_MAX_RPM}
+      AI_MAX_TOKENS_PER_MIN: ${AI_MAX_TOKENS_PER_MIN}
+      AI_BUDGET_USD_DAILY: ${AI_BUDGET_USD_DAILY}
+      AI_COST_PER_1K_TOKENS_USD: ${AI_COST_PER_1K_TOKENS_USD}
+    depends_on:
+      telemetry_gw_8030:
+        condition: service_started
+    ports: ["8023:8023"]
+
+  vision_ai_8024:
+    build:
+      context: ./services/vision-8024
+    environment:
+      TELEMETRY_URL: ${TELEMETRY_URL}
+    depends_on:
+      telemetry_gw_8030:
+        condition: service_started
+    ports: ["8024:8024"]
+
+  mapping_intel_8025:
+    build:
+      context: ./services/mapping-8025
+    environment:
+      TELEMETRY_URL: ${TELEMETRY_URL}
+      NOMINATIM_EMAIL: ${NOMINATIM_EMAIL}
+      USGS_USER_AGENT: ${USGS_USER_AGENT}
+    depends_on:
+      telemetry_gw_8030:
+        condition: service_started
+    ports: ["8025:8025"]
+
+  quality_engine_8026:
+    build:
+      context: ./services/quality-8026
+    environment:
+      TELEMETRY_URL: ${TELEMETRY_URL}
+    depends_on:
+      telemetry_gw_8030:
+        condition: service_started
+    ports: ["8026:8026"]
+
+  osint_contacts_8027:
+    build:
+      context: ./services/osint-8027
+    environment:
+      TELEMETRY_URL: ${TELEMETRY_URL}
+    depends_on:
+      telemetry_gw_8030:
+        condition: service_started
+    ports: ["8027:8027"]
+
+  event_monitor_8028:
+    build:
+      context: ./services/events-8028
+    environment:
+      TELEMETRY_URL: ${TELEMETRY_URL}
+    depends_on:
+      telemetry_gw_8030:
+        condition: service_started
+    ports: ["8028:8028"]

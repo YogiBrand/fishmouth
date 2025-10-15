@@ -32,6 +32,7 @@ CREATE TABLE IF NOT EXISTS ai_generations (
     tokens_used INTEGER, -- Tokens consumed
     cost_cents INTEGER, -- Cost in cents
     quality_score FLOAT, -- AI-assessed quality score
+    prompt_signature TEXT, -- Hash of prompt + context for caching
     timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (report_id) REFERENCES reports(id) ON DELETE SET NULL,
     FOREIGN KEY (lead_id) REFERENCES leads(id) ON DELETE SET NULL

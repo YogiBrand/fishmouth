@@ -1,0 +1,28 @@
+```
+/app
+  /frontend
+  /backend-8000
+  /orchestrator-8001
+  /image-8002
+  /ml-8003
+  /enrichment-8004
+  /leadgen-8008
+  /scraper-8011
+  /geocoder-8015
+  /ai-gateway-8023
+  /vision-8024
+  /mapping-8025
+  /quality-8026
+  /osint-8027
+  /events-8028
+  /geocompute-8029
+  /telemetry-8030
+  /admin-api-8031
+  /admin-ui
+  /tiles
+  /imagery
+  /observability
+  /config
+  /docs
+  /scripts
+```

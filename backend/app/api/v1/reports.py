@@ -9,7 +9,7 @@ from pathlib import Path
 from decimal import Decimal
 from typing import Any, Dict, Optional
 
-from fastapi import APIRouter, BackgroundTasks, HTTPException
+from fastapi import APIRouter, BackgroundTasks, HTTPException, Request
 from fastapi.responses import HTMLResponse
 import sqlalchemy as sa
 
@@ -20,6 +20,92 @@ from app.services.activity_stream import activity_notifier
 
 
 router = APIRouter(prefix="/api/v1/reports", tags=["reports"])
+# ---------------------------------------------------------------------------
+# Basic JSON APIs used by frontend
+# ---------------------------------------------------------------------------
+
+
+@router.get("")
+async def list_reports(limit: int = 25):
+    db = await get_db()
+    try:
+        rows = await db.fetch_all(
+            sa.text(
+                """
+                SELECT pr.*, p.address, c.company_name
+                FROM property_reports pr
+                LEFT JOIN properties p ON p.id = pr.property_id
+                LEFT JOIN contractors c ON c.id = pr.contractor_id
+                ORDER BY pr.generated_at DESC NULLS LAST, pr.created_at DESC
+                LIMIT :limit
+                """
+            ),
+            {"limit": limit},
+        )
+        return [_serialize(row) for row in rows]
+    finally:
+        await db.close()
+
+
+@router.get("/{report_id}")
+async def get_report(report_id: str):
+    db = await get_db()
+    try:
+        row = await db.fetch_one(sa.text("SELECT * FROM property_reports WHERE id = :id"), {"id": report_id})
+        if not row:
+            raise HTTPException(status_code=404, detail="Report not found")
+        return _serialize(row)
+    finally:
+        await db.close()
+
+
+@router.put("/{report_id}")
+async def update_report(report_id: str, payload: Dict[str, Any]):
+    db = await get_db()
+    try:
+        row = await db.fetch_one(sa.text("SELECT * FROM property_reports WHERE id = :id"), {"id": report_id})
+        if not row:
+            raise HTTPException(status_code=404, detail="Report not found")
+
+        # Update content/config/business_profile fields if present
+        updates: Dict[str, Any] = {}
+        for key in ("content", "config", "business_profile", "report_title"):
+            if key in payload:
+                updates[key] = json.dumps(payload[key]) if isinstance(payload[key], (dict, list)) else payload[key]
+        if not updates:
+            return _serialize(row)
+
+        set_parts = []
+        params: Dict[str, Any] = {"id": report_id}
+        for key, value in updates.items():
+            set_parts.append(f"{key} = :{key}")
+            params[key] = value
+        stmt = sa.text(f"UPDATE property_reports SET {', '.join(set_parts)}, updated_at = NOW() WHERE id = :id RETURNING *")
+        updated = await db.fetch_one(stmt, params)
+        await db.commit()
+        return _serialize(updated)
+    finally:
+        await db.close()
+
+
+@router.post("/generate-content")
+async def generate_content(payload: Dict[str, Any]):
+    """Regenerate a single section's content. This can be wired to LLMs later."""
+    section = payload.get("section") or "executive_summary"
+    prompt = payload.get("prompt") or f"Improve the {section.replace('_',' ')} section"
+    context = payload.get("context") or {}
+    existing = (context.get("existing_content") or "").strip()
+
+    # Placeholder generation that blends prompt + existing
+    improved = (prompt + "\n\n" + existing).strip() or f"{section.replace('_',' ').title()} content will appear here."
+    return {"content": improved}
+
+
+@router.post("/{report_id}/share")
+async def create_share_link(report_id: str):
+    """Return a share URL; if tokens are not required, return the internal view path."""
+    # For now return the first-class viewer route used by the frontend
+    return {"share_url": f"/reports/view/{report_id}"}
 
 
 # ---------------------------------------------------------------------------

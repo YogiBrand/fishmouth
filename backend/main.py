@@ -20,7 +20,7 @@ from prometheus_fastapi_instrumentator import Instrumentator
 from sqlalchemy import func, text
 from sqlalchemy.orm import Session
 from pydantic import BaseModel, EmailStr, Field
-from typing import Optional, List, Dict, Any
+from typing import Optional, List, Dict, Any, Literal
 from datetime import date, datetime, timedelta
 import secrets
 from pathlib import Path
@@ -44,6 +44,8 @@ from models import (
     Contractor,
     WalletPromotion,
 )
+from sqlalchemy.orm import Session
+from pydantic import BaseModel
 from auth import (
     verify_password,
     get_password_hash,
@@ -476,6 +478,33 @@ class LeadActivityResponse(BaseModel):
     class Config:
         from_attributes = True
 
+class ManualLeadPreferences(BaseModel):
+    include_street_view: bool = True
+    include_ai_brief: bool = True
+    include_sales_assets: bool = True
+    content_tier: Literal["standard", "premium", "maximal"] = "premium"
+
+
+class ManualLeadRequest(BaseModel):
+    address_line1: str = Field(..., min_length=1)
+    address_line2: Optional[str] = None
+    city: Optional[str] = None
+    state: Optional[str] = None
+    postal_code: Optional[str] = None
+    latitude: Optional[float] = Field(None, ge=-90, le=90)
+    longitude: Optional[float] = Field(None, ge=-180, le=180)
+    preferences: ManualLeadPreferences = Field(default_factory=ManualLeadPreferences)
+    deliverables: Dict[str, bool] = Field(default_factory=dict)
+    tags: List[str] = Field(default_factory=list)
+    notes: Optional[str] = None
+
+
+class ManualLeadResponse(BaseModel):
+    lead: LeadResponse
+    summary: Dict[str, Any]
+    next_actions: List[str]
+    activity_id: Optional[int] = None
+
 class LeadUpdate(BaseModel):
     status: Optional[LeadStatus] = None
     notes: Optional[str] = None
@@ -488,6 +517,49 @@ class LeadFilter(BaseModel):
     max_score: Optional[float] = None
     city: Optional[str] = None
     state: Optional[str] = None
+
+
+def serialize_lead(lead: Lead) -> LeadResponse:
+    return LeadResponse(
+        id=lead.id,
+        address=lead.address,
+        city=lead.city,
+        state=lead.state,
+        zip_code=lead.zip_code,
+        roof_age_years=lead.roof_age_years,
+        roof_condition_score=lead.roof_condition_score,
+        roof_material=lead.roof_material,
+        roof_size_sqft=lead.roof_size_sqft,
+        aerial_image_url=lead.aerial_image_url,
+        lead_score=lead.lead_score,
+        priority=lead.priority.value if lead.priority else LeadPriority.COLD.value,
+        replacement_urgency=lead.replacement_urgency,
+        damage_indicators=lead.damage_indicators,
+        discovery_status=lead.discovery_status,
+        imagery_status=lead.imagery_status,
+        property_enrichment_status=lead.property_enrichment_status,
+        contact_enrichment_status=lead.contact_enrichment_status,
+        homeowner_name=lead.homeowner_name,
+        homeowner_phone=lead.homeowner_phone,
+        homeowner_email=lead.homeowner_email,
+        property_value=lead.property_value,
+        estimated_value=lead.estimated_value,
+        conversion_probability=lead.conversion_probability,
+        ai_analysis=lead.ai_analysis,
+        image_quality_score=lead.image_quality_score,
+        image_quality_issues=lead.image_quality_issues,
+        quality_validation_status=lead.quality_validation_status,
+        street_view_quality=lead.street_view_quality,
+        roof_intelligence=lead.roof_intelligence,
+        analysis_confidence=lead.analysis_confidence,
+        overlay_url=lead.overlay_url,
+        score_version=lead.score_version,
+        area_scan_id=lead.area_scan_id,
+        status=lead.status.value if lead.status else LeadStatus.NEW.value,
+        created_at=lead.created_at.isoformat() if lead.created_at else datetime.utcnow().isoformat(),
+        voice_opt_out=lead.voice_opt_out,
+        last_voice_contacted=lead.last_voice_contacted.isoformat() if lead.last_voice_contacted else None,
+    )
 
 # Routes
 @app.get("/")
@@ -948,6 +1020,151 @@ async def save_business_profile(payload: BusinessProfilePayload, current_user: U
     db.refresh(contractor)
     return {"status": "saved"}
 
+
+# -------------------- Business Settings: Services/Pricing/Autofill --------------------
+
+class BusinessSettingsPayload(BaseModel):
+    services_config: dict | None = None
+    service_areas: dict | None = None
+    offers_packages: dict | None = None
+    content_library: dict | None = None
+    completeness: dict | None = None
+
+
+@app.get("/api/business/settings")
+async def get_business_settings(current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    contractor = db.query(Contractor).filter(Contractor.user_id == current_user.id).first()
+    if not contractor:
+        return {
+            "services_config": {},
+            "service_areas": {},
+            "offers_packages": {},
+            "completeness": {"missing_count": 0, "by_section": {}},
+            "autofill_status": "idle",
+            "last_scraped_at": None,
+            "pricing_suggestions": {},
+        }
+    return {
+        "services_config": contractor.services_config or {},
+        "service_areas": contractor.service_areas or {},
+        "offers_packages": contractor.offers_packages or {},
+        "completeness": contractor.completeness or {"missing_count": 0, "by_section": {}},
+        "autofill_status": contractor.autofill_status or "idle",
+        "last_scraped_at": contractor.last_scraped_at.isoformat() if contractor.last_scraped_at else None,
+        "pricing_suggestions": contractor.pricing_suggestions or {},
+    }
+
+
+@app.put("/api/business/settings")
+async def put_business_settings(payload: BusinessSettingsPayload, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    contractor = db.query(Contractor).filter(Contractor.user_id == current_user.id).first()
+    if not contractor:
+        contractor = Contractor(user_id=current_user.id)
+        db.add(contractor)
+    if payload.services_config is not None:
+        contractor.services_config = payload.services_config
+    if payload.service_areas is not None:
+        contractor.service_areas = payload.service_areas
+    if payload.offers_packages is not None:
+        contractor.offers_packages = payload.offers_packages
+    if payload.content_library is not None:
+        contractor.content_library = payload.content_library
+    if payload.completeness is not None:
+        contractor.completeness = payload.completeness
+    db.commit()
+    return {"status": "saved"}
+
+
+class AutofillRequest(BaseModel):
+    website_url: str
+
+
+@app.post("/api/business/settings/autofill")
+async def start_business_autofill(payload: AutofillRequest, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    contractor = db.query(Contractor).filter(Contractor.user_id == current_user.id).first()
+    if not contractor:
+        contractor = Contractor(user_id=current_user.id)
+        db.add(contractor)
+    contractor.autofill_status = "running"
+    db.commit()
+    # Kick off external scraper service (fire-and-forget best effort)
+    try:
+        import httpx
+        from datetime import datetime
+        scraper_url = "http://localhost:8011/scrape"
+        async with httpx.AsyncClient(timeout=20.0) as client:
+            resp = await client.post(scraper_url, json={"url": payload.website_url, "scrape_type": "contractor"})
+            data = resp.json() if resp.status_code == 200 else {"success": False}
+        harvested = data.get("data") or {}
+        contractor.services_config = contractor.services_config or {}
+        contractor.service_areas = contractor.service_areas or {}
+        contractor.offers_packages = contractor.offers_packages or {}
+        # naive mapping for MVP
+        if isinstance(harvested, dict):
+            services = harvested.get("services") or harvested.get("service_list") or []
+            testimonials = harvested.get("testimonials") or []
+            contractor.services_config.update({"items": services})
+            contractor.completeness = contractor.completeness or {"missing_count": 0, "by_section": {}}
+            contractor.completeness["by_section"] = {**contractor.completeness.get("by_section", {}), "portfolio": {"testimonials": len(testimonials)}}
+        contractor.last_scraped_at = datetime.utcnow()
+        contractor.autofill_status = "done"
+        db.commit()
+    except Exception:
+        contractor.autofill_status = "error"
+        db.commit()
+    return {"status": contractor.autofill_status}
+
+
+@app.get("/api/business/settings/autofill/status")
+async def business_autofill_status(current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    contractor = db.query(Contractor).filter(Contractor.user_id == current_user.id).first()
+    return {
+        "autofill_status": contractor.autofill_status if contractor else "idle",
+        "last_scraped_at": contractor.last_scraped_at.isoformat() if contractor and contractor.last_scraped_at else None,
+    }
+
+
+class ApplySuggestionsPayload(BaseModel):
+    state: str | None = None
+    services: list[dict] | None = None
+    accept: list[str] | None = None  # ids/names to apply
+
+
+@app.post("/api/business/settings/apply-suggestions")
+async def apply_suggestions(payload: ApplySuggestionsPayload, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    contractor = db.query(Contractor).filter(Contractor.user_id == current_user.id).first()
+    if not contractor:
+        contractor = Contractor(user_id=current_user.id)
+        db.add(contractor)
+
+    # compute suggestions
+    from app.services.pricing_suggester import suggest_price_ranges
+    suggestions = suggest_price_ranges(
+        (payload.state or "").upper(), payload.services or (contractor.services_config or {}).get("items", [])
+    )
+    contractor.pricing_suggestions = suggestions
+
+    # Optionally apply selected to services_config
+    to_accept = set(payload.accept or [])
+    if to_accept:
+        items = (contractor.services_config or {}).get("items", [])
+        new_items = []
+        for item in items:
+            sid = str(item.get("id") or item.get("name") or "")
+            if sid in to_accept and sid in suggestions:
+                sug = suggestions[sid]
+                item = {
+                    **item,
+                    "suggested_min": sug["suggested_min"],
+                    "suggested_max": sug["suggested_max"],
+                    "unit": item.get("unit") or sug.get("unit") or "project",
+                }
+            new_items.append(item)
+        contractor.services_config = {**(contractor.services_config or {}), "items": new_items}
+
+    db.commit()
+    return {"status": "ok", "suggestions": suggestions}
+
 @app.get("/admin/dashboard")
 async def admin_dashboard(current_user: User = Depends(get_current_admin), db: Session = Depends(get_db)):
     total_users = db.query(User).filter(User.role == "user").count()
@@ -1168,6 +1385,124 @@ async def get_scan_results(
         for lead in leads
     ]
 
+@app.post("/api/leads/manual", response_model=ManualLeadResponse, status_code=status.HTTP_201_CREATED)
+async def create_manual_lead(
+    payload: ManualLeadRequest,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    service = LeadGenerationService(db)
+    try:
+        result = await service.generate_manual_lead(
+            current_user.id,
+            address_line1=payload.address_line1,
+            address_line2=payload.address_line2,
+            city=payload.city,
+            state=payload.state,
+            postal_code=payload.postal_code,
+            latitude=payload.latitude,
+            longitude=payload.longitude,
+            include_street_view=payload.preferences.include_street_view,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
+    except Exception as exc:
+        logger.exception(
+            "manual_lead.failed",
+            user_id=current_user.id,
+            address=payload.address_line1,
+            error=str(exc),
+        )
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to generate lead") from exc
+
+    lead = result.lead
+
+    new_tags = set(lead.tags or [])
+    new_tags.add("manual_add")
+    for tag in payload.tags:
+        normalized = tag.strip()
+        if normalized:
+            new_tags.add(normalized.lower())
+    tier_tag = payload.preferences.content_tier
+    if tier_tag:
+        new_tags.add(f"manual_tier:{tier_tag}")
+    lead.tags = sorted(new_tags)
+
+    if payload.notes:
+        trimmed = payload.notes.strip()
+        if trimmed:
+            existing = (lead.notes or "").strip()
+            lead.notes = f"{existing}\n{trimmed}" if existing else trimmed
+
+    activity_metadata = result.activity.metadata or {}
+    activity_metadata["manual_preferences"] = {
+        "deliverables": payload.deliverables,
+        "content_tier": payload.preferences.content_tier,
+        "include_street_view": payload.preferences.include_street_view,
+        "include_ai_brief": payload.preferences.include_ai_brief,
+        "include_sales_assets": payload.preferences.include_sales_assets,
+    }
+    result.activity.metadata = activity_metadata
+
+    db.commit()
+    db.refresh(lead)
+    db.refresh(result.activity)
+
+    summary = {
+        "address": lead.address,
+        "lead_score": lead.lead_score,
+        "priority": lead.priority.value if lead.priority else LeadPriority.COLD.value,
+        "quality_status": result.quality_status,
+        "roof_age_years": lead.roof_age_years,
+        "analysis_summary": result.analysis.summary,
+        "replacement_urgency": result.analysis.replacement_urgency,
+        "damage_indicators": lead.damage_indicators or [],
+        "imagery_source": lead.imagery_status,
+        "contact_confidence": result.contact_profile.confidence,
+        "property_value": lead.property_value,
+        "deliverables": payload.deliverables,
+        "content_tier": payload.preferences.content_tier,
+        "street_view_requested": payload.preferences.include_street_view,
+    }
+
+    next_actions: List[str] = []
+    priority_value = lead.priority or LeadPriority.COLD
+    if priority_value == LeadPriority.HOT:
+        next_actions.extend(
+            [
+                "Enroll in AI follow-up sequence for immediate outreach.",
+                "Send premium homeowner dossier with hail findings.",
+            ]
+        )
+    elif priority_value == LeadPriority.WARM:
+        next_actions.extend(
+            [
+                "Queue nurture sequence with insurance education touchpoints.",
+                "Schedule a field inspection within 72 hours.",
+            ]
+        )
+    else:
+        next_actions.extend(
+            [
+                "Add to watchlist and schedule a personalized check-in.",
+                "Run localized mail or door hanger campaign within 7 days.",
+            ]
+        )
+
+    if payload.preferences.include_ai_brief:
+        next_actions.append("Review AI brief and tailor talking points for homeowner call.")
+
+    if payload.preferences.include_sales_assets:
+        next_actions.append("Attach new imagery to your proposal deck for this property.")
+
+    return ManualLeadResponse(
+        lead=serialize_lead(lead),
+        summary=summary,
+        next_actions=next_actions,
+        activity_id=result.activity.id,
+    )
+
+
 @app.get("/api/leads", response_model=List[LeadResponse])
 async def get_leads(
     priority: Optional[str] = None,
@@ -1198,49 +1533,7 @@ async def get_leads(
 
     leads = query.order_by(Lead.lead_score.desc()).limit(limit).all()
     
-    return [
-        LeadResponse(
-            id=lead.id,
-            address=lead.address,
-            city=lead.city,
-            state=lead.state,
-            zip_code=lead.zip_code,
-            roof_age_years=lead.roof_age_years,
-            roof_condition_score=lead.roof_condition_score,
-            roof_material=lead.roof_material,
-            roof_size_sqft=lead.roof_size_sqft,
-            aerial_image_url=lead.aerial_image_url,
-            lead_score=lead.lead_score,
-            priority=lead.priority.value if lead.priority else "cold",
-            replacement_urgency=lead.replacement_urgency,
-            damage_indicators=lead.damage_indicators,
-            discovery_status=lead.discovery_status,
-            imagery_status=lead.imagery_status,
-            property_enrichment_status=lead.property_enrichment_status,
-            contact_enrichment_status=lead.contact_enrichment_status,
-            homeowner_name=lead.homeowner_name,
-            homeowner_phone=lead.homeowner_phone,
-            homeowner_email=lead.homeowner_email,
-            property_value=lead.property_value,
-            estimated_value=lead.estimated_value,
-            conversion_probability=lead.conversion_probability,
-            ai_analysis=lead.ai_analysis,
-            image_quality_score=lead.image_quality_score,
-            image_quality_issues=lead.image_quality_issues,
-            quality_validation_status=lead.quality_validation_status,
-            street_view_quality=lead.street_view_quality,
-            roof_intelligence=lead.roof_intelligence,
-            analysis_confidence=lead.analysis_confidence,
-            overlay_url=lead.overlay_url,
-            score_version=lead.score_version,
-            area_scan_id=lead.area_scan_id,
-            status=lead.status.value if lead.status else "new",
-            created_at=lead.created_at.isoformat(),
-            voice_opt_out=lead.voice_opt_out,
-            last_voice_contacted=lead.last_voice_contacted.isoformat() if lead.last_voice_contacted else None,
-        )
-        for lead in leads
-    ]
+    return [serialize_lead(lead) for lead in leads]
 
 
 @app.get("/api/leads/export")
@@ -1350,45 +1643,12 @@ async def get_lead(
         raise HTTPException(status_code=404, detail="Lead not found")
     email = lead.homeowner_email or decrypt_value(lead.homeowner_email_encrypted)
     phone = lead.homeowner_phone or decrypt_value(lead.homeowner_phone_encrypted)
-    return LeadResponse(
-        id=lead.id,
-        address=lead.address,
-        city=lead.city,
-        state=lead.state,
-        zip_code=lead.zip_code,
-        roof_age_years=lead.roof_age_years,
-        roof_condition_score=lead.roof_condition_score,
-        roof_material=lead.roof_material,
-        roof_size_sqft=lead.roof_size_sqft,
-        aerial_image_url=lead.aerial_image_url,
-        lead_score=lead.lead_score,
-        priority=lead.priority.value if lead.priority else "cold",
-        replacement_urgency=lead.replacement_urgency,
-        damage_indicators=lead.damage_indicators,
-        discovery_status=lead.discovery_status,
-        imagery_status=lead.imagery_status,
-        property_enrichment_status=lead.property_enrichment_status,
-        contact_enrichment_status=lead.contact_enrichment_status,
-        homeowner_name=lead.homeowner_name,
-        homeowner_phone=phone,
-        homeowner_email=email,
-        property_value=lead.property_value,
-        estimated_value=lead.estimated_value,
-        conversion_probability=lead.conversion_probability,
-        ai_analysis=lead.ai_analysis,
-        image_quality_score=lead.image_quality_score,
-        image_quality_issues=lead.image_quality_issues,
-        quality_validation_status=lead.quality_validation_status,
-        street_view_quality=lead.street_view_quality,
-        roof_intelligence=lead.roof_intelligence,
-        analysis_confidence=lead.analysis_confidence,
-        overlay_url=lead.overlay_url,
-        score_version=lead.score_version,
-        area_scan_id=lead.area_scan_id,
-        status=lead.status.value if lead.status else "new",
-        created_at=lead.created_at.isoformat(),
-        voice_opt_out=lead.voice_opt_out,
-        last_voice_contacted=lead.last_voice_contacted.isoformat() if lead.last_voice_contacted else None,
+    base = serialize_lead(lead)
+    return base.copy(
+        update={
+            "homeowner_email": email,
+            "homeowner_phone": phone,
+        }
     )
 
 

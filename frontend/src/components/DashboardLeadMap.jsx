@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
+import LeadQueueTabs from './LeadQueueTabs';
 import Map, { Layer, Marker, Source } from 'react-map-gl/maplibre';
 import maplibregl from 'maplibre-gl';
 import 'maplibre-gl/dist/maplibre-gl.css';
@@ -233,6 +234,11 @@ const DashboardLeadMap = ({
   maxVisible = 12,
   recentlyRewardedLeadId,
   isDark = false,
+  // Lead table props to render under the map
+  leadQueueTabs = [],
+  leadQueue = {},
+  leadTableColumns = [],
+  onGenerateReport,
 }) => {
   const entryList = useMemo(
     () => (leadEntries || []).filter((entry) => entry?.lead),
@@ -245,7 +251,6 @@ const DashboardLeadMap = ({
   );
 
   const featuredEntries = useMemo(() => visibleEntries.slice(0, 4), [visibleEntries]);
-  const supplementalEntries = useMemo(() => visibleEntries.slice(4), [visibleEntries]);
 
   const mapRef = useRef(null);
   const [mapLoaded, setMapLoaded] = useState(false);
@@ -454,8 +459,6 @@ const DashboardLeadMap = ({
     ? visibleEntries.findIndex((entry) => Number(entry.lead?.id) === Number(selectedLead.id))
     : -1;
   const selectedRank = selectedIndex >= 0 ? selectedIndex + 1 : null;
-
-  const totalVisible = visibleEntries.length;
 
   const surfacePrimary = isDark ? 'border-slate-800 bg-slate-950/70 text-slate-100' : 'border-slate-200 bg-white';
   const surfaceSecondary = isDark ? 'border-slate-800 bg-slate-900/70 text-slate-100' : 'border-slate-200 bg-white';
@@ -890,219 +893,22 @@ const DashboardLeadMap = ({
           )}
         </div>
 
-        {featuredEntries.length > 0 && (
-          <div className="grid gap-4 grid-cols-1 sm:grid-cols-2 xl:grid-cols-4">
-            {featuredEntries.map((entry, idx) => {
-              const lead = entry.lead;
-              if (!lead) return null;
-              const previewImage = getPreviewImage(lead);
-              const heatmapImage = getHeatmapImage(lead);
-              const isActive =
-                selectedLead && Number(selectedLead.id) === Number(lead.id);
-              const isRewarded =
-                recentlyRewardedLeadId != null &&
-                Number(recentlyRewardedLeadId) === Number(lead.id);
-              const urgencyLevel = entry.urgency?.level || 'unknown';
-              const urgencyTone = URGENCY_BADGES[urgencyLevel] || URGENCY_BADGES.unknown;
-              const urgencyLabel = URGENCY_LABELS[urgencyLevel] || URGENCY_LABELS.unknown;
-              const score = Math.round(lead.lead_score || lead.score || 0);
-              const probability = Math.round(
-                lead.ai_analysis?.deal_probability || lead.lead_score || lead.score || 0
-              );
-
-              return (
-                <article
-                  key={`featured-card-${lead.id || idx}`}
-                  tabIndex={0}
-                  onClick={() => handleSelectEntry(entry)}
-                  onKeyDown={(event) => {
-                    if (event.key === 'Enter' || event.key === ' ') {
-                      event.preventDefault();
-                      handleSelectEntry(entry);
-                    }
-                  }}
-                  className={`rounded-3xl border ${surfaceSecondary} text-left shadow-lg transition hover:shadow-2xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 flex flex-col h-full min-h-[250px] ${
-                    isActive ? 'ring-2 ring-blue-400/60' : ''
-                  } ${isRewarded ? 'ring-2 ring-emerald-400/60' : ''}`}
-                >
-                  <div className="relative h-32 w-full overflow-hidden rounded-t-3xl">
-                    {previewImage ? (
-                      <img
-                        src={previewImage}
-                        alt={lead.address || 'Lead imagery'}
-                        className="w-full h-full object-cover"
-                        loading="lazy"
-                      />
-                    ) : (
-                      <div className="w-full h-full flex items-center justify-center text-[11px] opacity-70">
-                        Imagery syncing…
-                      </div>
-                    )}
-                    {heatmapImage && (
-                      <img
-                        src={heatmapImage}
-                        alt="Heatmap overlay"
-                        className="absolute inset-0 w-full h-full object-cover mix-blend-screen opacity-70"
-                        loading="lazy"
-                      />
-                    )}
-                    <div className="absolute top-3 left-3 flex items-center gap-2">
-                      <span className="inline-flex items-center gap-1 rounded-full bg-slate-950/70 px-2 py-0.5 text-[11px] font-semibold text-white">
-                        #{idx + 1}
-                      </span>
-                      <span
-                        className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-semibold ${urgencyTone}`}
-                      >
-                        {urgencyLabel}
-                      </span>
-                    </div>
-                    <span
-                      className={`absolute top-3 right-3 inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-semibold ${
-                        isDark ? 'bg-amber-500/25 text-amber-200' : 'bg-amber-100 text-amber-700'
-                      } ${isRewarded ? 'animate-point-drain' : ''}`}
-                    >
-                      <Sparkles className="w-3 h-3" /> +{TOTAL_ACTION_POINTS}
-                    </span>
-                  </div>
-                  <div className="p-5 space-y-3 flex flex-col h-full">
-                    <div className="flex items-start justify-between gap-3">
-                      <div className="min-w-0">
-                        <p className={`text-sm font-semibold ${headerTextClass} truncate`}>
-                          {lead.homeowner_name || lead.name || lead.address}
-                        </p>
-                        <p className={`text-xs ${subTextClass} truncate`}>
-                          {formatLocation(lead) || 'Address syncing'}
-                        </p>
-                      </div>
-                      <div className="text-right">
-                        <p className={`text-[11px] uppercase tracking-wide ${subTextClass}`}>Score</p>
-                        <p className="text-base font-semibold text-amber-500">{score}</p>
-                      </div>
-                    </div>
-                    <p className={`text-xs ${subTextClass} line-clamp-2`}>
-                      {entry.urgency?.message || 'Line up crews now—this homeowner is ready for next steps.'}
-                    </p>
-                    <div className="flex items-center justify-between text-[11px] font-semibold">
-                      <span className={`inline-flex items-center gap-1 ${subTextClass}`}>
-                        Likelihood {probability}%
-                      </span>
-                      {lead.damage_estimate && (
-                        <span className={`inline-flex items-center gap-1 ${subTextClass}`}>
-                          Est. ${Number(lead.damage_estimate).toLocaleString()}
-                        </span>
-                      )}
-                    </div>
-                    <div className="grid grid-cols-2 gap-2 pt-1 mt-auto">
-                      {[
-                        {
-                          key: 'inspect',
-                          label: 'Inspect',
-                          icon: <Eye className="w-3.5 h-3.5" />,
-                          action: () => onOpenLead?.(lead),
-                          disabled: false,
-                          points: ACTION_POINT_VALUES.inspect,
-                          tone: 'amber',
-                        },
-                        {
-                          key: 'sequence',
-                          label: 'Sequence',
-                          icon: <Sparkles className="w-3.5 h-3.5" />,
-                          action: () => onStartSequence?.(lead),
-                          disabled: false,
-                          points: ACTION_POINT_VALUES.sequence,
-                          tone: 'indigo',
-                        },
-                        {
-                          key: 'call',
-                          label: 'Call',
-                          icon: <Phone className="w-3.5 h-3.5" />,
-                          action: () => onCallLead?.(lead),
-                          disabled: !lead.homeowner_phone && !lead.phone,
-                          points: ACTION_POINT_VALUES.call,
-                          tone: 'emerald',
-                        },
-                        {
-                          key: 'email',
-                          label: 'Email',
-                          icon: <Mail className="w-3.5 h-3.5" />,
-                          action: () => onSendEmail?.(lead),
-                          disabled: !lead.homeowner_email && !lead.email,
-                          points: ACTION_POINT_VALUES.email,
-                          tone: 'blue',
-                        },
-                      ].map((action) => (
-                        <LeadAction
-                          key={`${lead.id}-${action.key}`}
-                          label={action.label}
-                          icon={action.icon}
-                          onClick={action.action}
-                          disabled={action.disabled}
-                          points={action.points}
-                          tone={action.tone}
-                          isDark={isDark}
-                        />
-                      ))}
-                    </div>
-                  </div>
-                </article>
-              );
-            })}
-          </div>
-        )}
-
-        {supplementalEntries.length > 0 && (
-          <div className="space-y-3 pt-3 border-t border-slate-200/70 dark:border-slate-800/70">
-            <p className={`text-xs uppercase tracking-wide ${subTextClass}`}>More hot leads</p>
-            <div className="flex gap-3 overflow-x-auto pb-3 scrollbar-hide">
-              {supplementalEntries.map((entry, idx) => {
-                const lead = entry.lead;
-                if (!lead) return null;
-                const previewImage = getPreviewImage(lead);
-                const heatmapImage = getHeatmapImage(lead);
-                const score = Math.round(lead.lead_score || lead.score || 0);
-                return (
-                  <button
-                    type="button"
-                    key={`supplemental-card-${lead.id || idx}`}
-                    onClick={() => handleSelectEntry(entry)}
-                    className={`w-60 flex-shrink-0 rounded-3xl border ${surfaceSecondary} text-left shadow-sm transition hover:shadow-lg`}
-                  >
-                    <div className="relative h-28 w-full overflow-hidden rounded-t-3xl">
-                      {previewImage ? (
-                        <img
-                          src={previewImage}
-                          alt={lead.address || 'Lead imagery'}
-                          className="w-full h-full object-cover"
-                          loading="lazy"
-                        />
-                      ) : (
-                        <div className="w-full h-full flex items-center justify-center text-[11px] opacity-70">
-                          Imagery syncing…
-                        </div>
-                      )}
-                      {heatmapImage && (
-                        <img
-                          src={heatmapImage}
-                          alt="Heatmap overlay"
-                          className="absolute inset-0 w-full h-full object-cover mix-blend-screen opacity-70"
-                          loading="lazy"
-                        />
-                      )}
-                    </div>
-                    <div className="p-4 space-y-2">
-                      <p className={`text-sm font-semibold ${headerTextClass} truncate`}>
-                        {lead.homeowner_name || lead.name || lead.address}
-                      </p>
-                      <p className={`text-[11px] ${subTextClass} truncate`}>
-                        Score {score} • {URGENCY_LABELS[entry.urgency?.level || 'unknown']}
-                      </p>
-                    </div>
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-        )}
+        {/* Replace smaller cards with the lead table inside the same container */}
+        <div className={`mt-4`}>
+          <LeadQueueTabs
+            tabs={leadQueueTabs}
+            leadQueue={leadQueue}
+            columns={leadTableColumns}
+            isDark={isDark}
+            onOpenLead={(lead) => {
+              onSelectLead?.(lead);
+              onOpenLead?.(lead);
+            }}
+            onCallLead={onCallLead}
+            onAssignSequence={onStartSequence}
+            onGenerateReport={(leadId, _template, lead) => onGenerateReport?.(leadId, undefined, lead)}
+          />
+        </div>
       </div>
     </section>
   );

@@ -15,10 +15,13 @@ from pydantic import BaseModel, Field
 
 from app.core.config import get_settings
 from app.core.database import get_db
-from app.services.ai_voice_agent import AIVoiceAgentService
 from app.services.enhanced_report_renderer import (
     EnhancedReportRenderer,
     ensure_reports_directory,
+)
+from app.services.report_content_generator import (
+    ReportContentGenerator,
+    build_prompt_signature,
 )
 from app.utils.report_tokens import resolve_report_tokens
 from services.sequence_delivery import get_delivery_adapters
@@ -26,6 +29,7 @@ from weasyprint import HTML
 
 router = APIRouter(prefix="/api/v1/reports", tags=["enhanced-reports"])
 renderer = EnhancedReportRenderer()
+content_generator = ReportContentGenerator()
 settings = get_settings()
 @router.get("")
 async def list_reports(limit: int = 20):
@@ -96,6 +100,7 @@ class AIContentGeneration(BaseModel):
     lead_id: Optional[str] = None
     report_id: Optional[str] = None
     context: Optional[Dict[str, Any]] = Field(default_factory=dict)
+    force_refresh: bool = Field(default=False, description="Ignore cached generations and call the AI provider")
 
 
 class ReportSend(BaseModel):
@@ -457,67 +462,95 @@ async def update_report(report_id: str, update_data: ReportUpdate):
 
 @router.post("/generate-content")
 async def generate_ai_content(content_request: AIContentGeneration):
-    """Generate AI content for report sections."""
+    """Generate AI content for report sections with caching."""
+
+    db = await get_db()
     try:
-        # Use AI service to generate content
-        ai_service = AIVoiceAgentService()
-        
-        # Enhanced prompt with context
-        enhanced_prompt = f"""
-        Generate professional content for a roofing report section.
-        
-        Section: {content_request.section}
-        Base Prompt: {content_request.prompt}
-        
-        Context:
-        - Property: {content_request.context.get('property_data', {}).get('address', 'Unknown')}
-        - Report Type: {content_request.context.get('report_type', 'general')}
-        - Business: {content_request.context.get('business_profile', {}).get('company', {}).get('name', 'Roofing Company')}
-        
-        Requirements:
-        - Use professional but accessible language
-        - Include specific, actionable information
-        - Maintain a helpful, trustworthy tone
-        - Format as clean, readable paragraphs
-        - Length: 150-300 words
-        
-        Generate content:
-        """
-        
-        generated_content = await ai_service.generate_text_content(enhanced_prompt)
-        
-        # Store generation in database for tracking
-        db = await get_db()
-        try:
-            await db.execute(
-                sa.text("""
-                    INSERT INTO ai_generations (
-                        section, prompt, content, report_id, lead_id, timestamp
-                    ) VALUES (
-                        :section, :prompt, :content, :report_id, :lead_id, :timestamp
-                    )
-                """),
-                {
-                    "section": content_request.section,
-                    "prompt": content_request.prompt,
-                    "content": generated_content,
-                    "report_id": content_request.report_id,
-                    "lead_id": content_request.lead_id,
-                    "timestamp": datetime.utcnow()
-                }
+        context = content_request.context or {}
+        signature = build_prompt_signature(
+            content_request.section,
+            content_request.prompt,
+            context,
+        )
+
+        if not content_request.force_refresh:
+            cached = await db.fetch_one(
+                sa.text(
+                    """
+                    SELECT content, model_used, generation_time_ms, tokens_used, timestamp
+                    FROM ai_generations
+                    WHERE prompt_signature = :signature
+                    ORDER BY timestamp DESC
+                    LIMIT 1
+                    """
+                ),
+                {"signature": signature},
             )
-            await db.commit()
-        finally:
-            await db.close()
-        
+            if cached and cached.get("content"):
+                return {
+                    "content": cached["content"],
+                    "section": content_request.section,
+                    "generated_at": (cached.get("timestamp") or datetime.utcnow()).isoformat(),
+                    "model": cached.get("model_used"),
+                    "cached": True,
+                }
+
+        generation_context = dict(context)
+        generation_context.setdefault(
+            "report_type",
+            content_request.context.get("report_type") if content_request.context else None,
+        )
+
+        generated_content, meta = await content_generator.generate_section(
+            content_request.section,
+            content_request.prompt,
+            generation_context,
+        )
+
+        await db.execute(
+            sa.text(
+                """
+                INSERT INTO ai_generations (
+                    section, prompt, content, report_id, lead_id,
+                    model_used, generation_time_ms, tokens_used,
+                    prompt_signature, timestamp
+                ) VALUES (
+                    :section, :prompt, :content, :report_id, :lead_id,
+                    :model_used, :generation_time_ms, :tokens_used,
+                    :prompt_signature, :timestamp
+                )
+                """
+            ),
+            {
+                "section": content_request.section,
+                "prompt": content_request.prompt,
+                "content": generated_content,
+                "report_id": content_request.report_id,
+                "lead_id": content_request.lead_id,
+                "model_used": meta.get("model"),
+                "generation_time_ms": meta.get("duration_ms"),
+                "tokens_used": meta.get("tokens"),
+                "prompt_signature": signature,
+                "timestamp": datetime.utcnow(),
+            },
+        )
+        await db.commit()
+
         return {
             "content": generated_content,
             "section": content_request.section,
-            "generated_at": datetime.utcnow().isoformat()
+            "generated_at": datetime.utcnow().isoformat(),
+            "model": meta.get("model"),
+            "cached": False,
         }
-        
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to generate AI content: {str(e)}")
+
+    except HTTPException:
+        raise
+    except Exception as exc:  # noqa: BLE001
+        await db.rollback()
+        raise HTTPException(status_code=500, detail=f"Failed to generate AI content: {exc}")
+    finally:
+        await db.close()
 
 
 @router.post("/{report_id}/generate-pdf")

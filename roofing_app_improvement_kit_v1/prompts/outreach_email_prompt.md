@@ -1,0 +1,1 @@
+Draft a short, professional email to {owner_name} re: {address}. Reference findings at a high level, propose a free inspection, give 2 time windows, and include a clear opt‑out sentence.

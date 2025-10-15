@@ -1,0 +1,14 @@
+services:
+  geocompute_8029:
+    build: ./geocompute-8029
+    ports: ["8029:8029"]
+  telemetry_gw_8030:
+    build: ./telemetry-gw
+    ports: ["8030:8030"]
+    environment:
+      - ANALYTICS_URL=${ANALYTICS_URL}
+  admin_api_8031:
+    build: ./admin-api
+    ports: ["8031:8031"]
+    environment:
+      - ANALYTICS_URL=${ANALYTICS_URL}

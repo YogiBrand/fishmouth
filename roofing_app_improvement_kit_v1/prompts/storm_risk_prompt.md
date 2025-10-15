@@ -1,0 +1,1 @@
+Given storm cells {storm_tracks} and exposure metrics {exposure}, score damage probability (0–1) and propose outreach timing and crew routing windows.

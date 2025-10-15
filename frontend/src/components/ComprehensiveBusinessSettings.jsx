@@ -47,6 +47,9 @@ const CREDIT_PRICING = {
 const ComprehensiveBusinessSettings = () => {
   const [activeTab, setActiveTab] = useState('company');
   const [showRewardsModal, setShowRewardsModal] = useState(false);
+  const [showAutofillModal, setShowAutofillModal] = useState(false);
+  const [autofillDiffItems, setAutofillDiffItems] = useState([]);
+  const [autofillAccept, setAutofillAccept] = useState({});
   const getStoredNumber = (key, fallback = 0) => {
     if (typeof window === 'undefined') return fallback;
     const raw = window.localStorage.getItem(key);
@@ -121,6 +124,8 @@ const ComprehensiveBusinessSettings = () => {
   const [isDarkMode, setIsDarkMode] = useState(
     () => typeof document !== 'undefined' && document.documentElement.classList.contains('dark')
   );
+  const [missingCount, setMissingCount] = useState(0);
+  const [knowledgeItems, setKnowledgeItems] = useState(() => getStoredObject('fm_ai_knowledge', []));
   const [businessProfile, setBusinessProfile] = useState({
     company: {
       name: '',
@@ -164,7 +169,8 @@ const ComprehensiveBusinessSettings = () => {
       communicationStyle: 'consultative',
       keyMessaging: [],
       objectionHandling: [],
-      closingApproaches: []
+      closingApproaches: [],
+      offers: {}
     },
     integrations: {
       website: '',
@@ -205,7 +211,6 @@ const ComprehensiveBusinessSettings = () => {
       { id: 'portfolio', label: 'Portfolio & Cases', icon: Camera, color: 'amber' },
       { id: 'messaging', label: 'AI & Messaging', icon: Bot, color: 'rose' },
       { id: 'integrations', label: 'Integrations', icon: Settings, color: 'cyan' },
-      { id: 'rewards', label: 'Rewards & Credits', icon: Trophy, color: 'violet' },
     ],
     []
   );
@@ -780,9 +785,37 @@ const ComprehensiveBusinessSettings = () => {
     try {
       setLoading(true);
       await businessProfileService.save(businessProfile);
-      toast.success('Business profile saved successfully!');
+      // Persist structured settings
+      const services_config = {
+        items: (businessProfile.services?.primaryServices || []).map((svc, idx) => {
+          if (typeof svc === 'string') return { id: `${idx}`, name: svc, priority: idx + 1 };
+          return {
+            id: svc.id || `${idx}`,
+            name: svc.name,
+            priority: svc.priority || idx + 1,
+            price_min: svc.price_min ?? '',
+            price_max: svc.price_max ?? '',
+            unit: svc.unit || 'project',
+            notes: svc.notes || '',
+            suggested_min: svc.suggested_min,
+            suggested_max: svc.suggested_max,
+          };
+        }),
+      };
+      const service_areas = { items: businessProfile.services?.serviceAreas || [] };
+      const offers_packages = businessProfile.aiAgent?.offers || {};
+      const content_library = {
+        portfolio: businessProfile.caseStudies?.portfolio || [],
+        testimonials: businessProfile.caseStudies?.testimonials || [],
+        beforeAfter: businessProfile.caseStudies?.beforeAfterSets || [],
+        usage_flags: businessProfile.caseStudies?.usageFlags || {},
+        knowledge: knowledgeItems || [],
+      };
+      const completeness = { missing_count: Math.max(0, 100 - completionScore), by_section: {} };
+      await businessProfileService.saveSettings({ services_config, service_areas, offers_packages, content_library, completeness });
+      toast.success('Business profile and settings saved successfully!');
     } catch (error) {
-      toast.error('Failed to save business profile');
+      toast.error('Failed to save business profile/settings');
     } finally {
       setLoading(false);
     }
@@ -808,6 +841,7 @@ const ComprehensiveBusinessSettings = () => {
     countFields(businessProfile);
     const score = totalFields > 0 ? Math.round((completedFields / totalFields) * 100) : 0;
     setCompletionScore(score);
+    setMissingCount(Math.max(0, totalFields - completedFields));
   }, [businessProfile]);
 
   const scrapeWebsite = async (url) => {
@@ -815,41 +849,26 @@ const ComprehensiveBusinessSettings = () => {
     
     setWebsiteScraping(true);
     try {
-      // Mock website scraping - in real app this would call your AI service
-      await new Promise(resolve => setTimeout(resolve, 3000));
-      
-      const scrapedData = {
-        company: {
-          name: "Elite Roofing Solutions",
-          tagline: "Excellence Above, Protection Below",
-          phone: "(555) 123-4567",
-          email: "info@eliteroofing.com",
-          yearsInBusiness: "15",
-          serviceRadius: "50 miles"
-        },
-        services: {
-          primaryServices: ["Roof Replacement", "Storm Damage Repair", "Gutter Installation"],
-          specialties: ["Metal Roofing", "Tile Restoration", "Emergency Repairs"],
-          certifications: ["GAF Master Elite", "CertainTeed ShingleMaster"]
-        },
-        branding: {
-          valuePropositions: [
-            "15+ years of trusted service",
-            "100% satisfaction guarantee",
-            "Licensed & fully insured"
-          ]
-        }
-      };
-
-      setBusinessProfile(prev => ({
-        ...prev,
-        ...scrapedData,
-        company: { ...prev.company, ...scrapedData.company },
-        services: { ...prev.services, ...scrapedData.services },
-        branding: { ...prev.branding, ...scrapedData.branding }
-      }));
-
-      toast.success('Website data imported successfully!');
+      await businessProfileService.startAutofill(url);
+      let status = 'running';
+      const start = Date.now();
+      while (status === 'running' && Date.now() - start < 20000) {
+        await new Promise((r) => setTimeout(r, 1200));
+        const s = await businessProfileService.getAutofillStatus();
+        status = s.autofill_status;
+      }
+      const settings = await businessProfileService.loadSettings();
+      const harvested = (settings.services_config?.items || []).map((it) => ({ id: it.id || it.name, name: it.name || it.id, priority: it.priority || 1, price_min: it.price_min || '', price_max: it.price_max || '', unit: it.unit || 'project', notes: it.notes || '', suggested_min: it.suggested_min, suggested_max: it.suggested_max }));
+      const existingNames = new Set((businessProfile.services?.primaryServices || []).map((s) => (typeof s === 'string' ? s : s?.name)).filter(Boolean));
+      const diffs = harvested.filter((h) => !existingNames.has(h.name));
+      if (diffs.length) {
+        setAutofillDiffItems(diffs);
+        setAutofillAccept(Object.fromEntries(diffs.map((d) => [String(d.id || d.name), true])));
+        setShowAutofillModal(true);
+      } else {
+        toast('No new services found. Suggestions updated.');
+      }
+      toast.success('Auto-fill completed. Review suggested additions.');
     } catch (error) {
       toast.error('Failed to scrape website data');
     } finally {
@@ -915,7 +934,14 @@ const ComprehensiveBusinessSettings = () => {
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-50 via-white to-blue-50">
+    <div
+      className="min-h-screen bg-gradient-to-br from-slate-50 via-white to-blue-50"
+      style={{
+        '--brand-primary': businessProfile?.branding?.primaryColor || '#2563eb',
+        '--brand-secondary': businessProfile?.branding?.secondaryColor || '#64748b',
+        '--brand-accent': businessProfile?.branding?.accentColor || '#f59e0b',
+      }}
+    >
       {/* Header */}
       <header className="bg-white/90 dark:bg-slate-900/80 backdrop-blur-xl border-b border-slate-200/60 sticky top-0 z-50">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
@@ -925,16 +951,24 @@ const ComprehensiveBusinessSettings = () => {
                 <div className="w-10 h-10 rounded-2xl bg-gradient-to-br from-blue-600 via-indigo-600 to-purple-600 text-white flex items-center justify-center shadow-lg shadow-blue-500/20">🏗️</div>
                 <div>
                   <h1 className="text-2xl font-bold text-slate-900 tracking-tight">Business Profile</h1>
-                  <p className="text-sm text-slate-500">Set up your brand, portfolio, and AI messaging</p>
+                  <p className="text-sm text-slate-500">Set up your brand, services, pricing, portfolio, and AI messaging</p>
                 </div>
               </div>
             </div>
             <div className="flex items-center space-x-4">
+              <div className="relative">
               <CompletionIndicator score={completionScore} />
+                {missingCount > 0 && (
+                  <span className="absolute -top-2 -right-2 inline-flex items-center justify-center min-w-[1.25rem] px-1 text-[10px] font-semibold rounded-full bg-rose-500 text-white">
+                    {missingCount}
+                  </span>
+                )}
+              </div>
               <button
                 onClick={saveBusinessProfile}
                 disabled={loading}
-                className="flex items-center space-x-2 px-4 py-2 bg-gradient-to-r from-blue-600 to-cyan-600 hover:from-blue-700 hover:to-cyan-700 disabled:opacity-50 text-white rounded-xl shadow-lg transition"
+                className="flex items-center space-x-2 px-4 py-2 disabled:opacity-50 text-white rounded-xl shadow-lg transition"
+                style={{ background: 'linear-gradient(90deg, var(--brand-primary), var(--brand-accent))' }}
               >
                 {loading ? <Loader size={16} className="animate-spin" /> : <Save size={16} />}
                 <span>Save Changes</span>
@@ -945,7 +979,7 @@ const ComprehensiveBusinessSettings = () => {
       </header>
 
       {/* Tab Navigation */}
-      <div className="bg-white/90 dark:bg-slate-900/70 backdrop-blur-sm border-b border-slate-200/60">
+      <div className="bg-white/90 dark:bg-slate-900/70 backdrop-blur-sm border-b border-slate-200/60" style={{ borderColor: 'color-mix(in srgb, var(--brand-primary) 20%, #e2e8f0)' }}>
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="flex space-x-1 overflow-x-auto py-4">
             {tabs.map((tab) => (
@@ -961,7 +995,7 @@ const ComprehensiveBusinessSettings = () => {
       </div>
 
       {/* Main Content */}
-      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-10">
+      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-10" style={{ accentColor: 'var(--brand-primary)' }}>
         {activeTab === 'company' && (
           <CompanyInfoSection
             data={businessProfile.company}
@@ -992,6 +1026,8 @@ const ComprehensiveBusinessSettings = () => {
             onChange={(field, value) => handleInputChange('caseStudies', field, value)}
             onAddItem={(field, item) => addArrayItem('caseStudies', field, item)}
             onRemoveItem={(field, index) => removeArrayItem('caseStudies', field, index)}
+            knowledgeItems={knowledgeItems}
+            onKnowledgeChange={setKnowledgeItems}
           />
         )}
         {activeTab === 'messaging' && (
@@ -1001,6 +1037,8 @@ const ComprehensiveBusinessSettings = () => {
             onAddItem={(field, item) => addArrayItem('aiAgent', field, item)}
             onRemoveItem={(field, index) => removeArrayItem('aiAgent', field, index)}
             businessData={businessProfile}
+            knowledgeItems={knowledgeItems}
+            onKnowledgeChange={setKnowledgeItems}
           />
         )}
         {activeTab === 'integrations' && (
@@ -1083,6 +1121,54 @@ const ComprehensiveBusinessSettings = () => {
           onOpenLedger={() => setShowRewardsModal(true)}
           isDarkMode={isDarkMode}
         />
+      )}
+      {/* Auto-fill Diff Modal */}
+      {showAutofillModal && (
+        <div className="fixed inset-0 bg-black/40 backdrop-blur-sm flex items-center justify-center z-50">
+          <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-2xl max-w-2xl w-full p-6">
+            <h3 className="text-lg font-semibold mb-3">Review auto-fill additions</h3>
+            <p className="text-sm text-slate-500 mb-3">Select which detected services to add.</p>
+            <div className="max-h-80 overflow-y-auto divide-y divide-slate-200 dark:divide-slate-800 rounded-lg border border-slate-200 dark:border-slate-800">
+              {autofillDiffItems.map((item) => {
+                const key = String(item.id || item.name);
+                const checked = Boolean(autofillAccept[key]);
+                return (
+                  <label key={key} className="flex items-center gap-3 p-3">
+                    <input type="checkbox" className="h-4 w-4" checked={checked} onChange={(e) => setAutofillAccept((prev) => ({ ...prev, [key]: e.target.checked }))} />
+                    <div className="flex-1">
+                      <div className="text-sm font-medium">{item.name}</div>
+                      {(item.suggested_min || item.suggested_max) && (
+                        <div className="text-xs text-emerald-600">Suggested {item.suggested_min ? `$${item.suggested_min}` : ''}{item.suggested_min && item.suggested_max ? ' — ' : ''}{item.suggested_max ? `$${item.suggested_max}` : ''}</div>
+                      )}
+                    </div>
+                  </label>
+                );
+              })}
+            </div>
+            <div className="mt-4 flex justify-end gap-2">
+              <button type="button" className="px-3 py-2 text-sm rounded-lg border" onClick={() => setShowAutofillModal(false)}>Cancel</button>
+              <button
+                type="button"
+                className="px-3 py-2 text-sm rounded-lg bg-blue-600 text-white"
+                onClick={() => {
+                  const selected = autofillDiffItems.filter((it) => autofillAccept[String(it.id || it.name)]);
+                  if (selected.length) {
+                    setBusinessProfile((prev) => ({
+                      ...prev,
+                      services: {
+                        ...prev.services,
+                        primaryServices: [...(prev.services?.primaryServices || []), ...selected],
+                      },
+                    }));
+                  }
+                  setShowAutofillModal(false);
+                }}
+              >
+                Add selected
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );
@@ -1819,7 +1905,7 @@ const CompanyInfoSection = ({ data, onChange, onWebsiteScrape, scraping }) => {
 
   return (
     <div className="space-y-6">
-      <div className="bg-white dark:bg-slate-900/70/70 backdrop-blur-sm rounded-2xl border border-slate-200/60 shadow-xl p-6">
+      <div className="bg-white dark:bg-slate-900/70/70 backdrop-sm rounded-2xl border border-slate-200/60 shadow-xl p-6">
         <div className="flex items-center justify-between mb-6">
           <div>
             <h2 className="text-2xl font-bold text-slate-900">Company Information</h2>
@@ -1916,7 +2002,7 @@ const CompanyInfoSection = ({ data, onChange, onWebsiteScrape, scraping }) => {
 // Branding Section Component
 const BrandingSection = ({ data, onChange, onUpload }) => (
   <div className="space-y-6">
-    <div className="bg-white dark:bg-slate-900/70/70 backdrop-blur-sm rounded-3xl border border-slate-200/60 shadow-xl p-6">
+    <div className="bg-white dark:bg-slate-900/70/70 backdrop-sm rounded-3xl border shadow-xl p-6" style={{ borderColor: 'color-mix(in srgb, var(--brand-secondary) 20%, #e2e8f0)' }}>
       <div className="flex items-center justify-between mb-6">
           <div>
           <h2 className="text-2xl font-bold text-slate-900 tracking-tight">Brand & Design</h2>
@@ -1925,7 +2011,7 @@ const BrandingSection = ({ data, onChange, onUpload }) => (
           </div>
       <div className="grid grid-cols-1 xl:grid-cols-3 gap-8">
         <div className="xl:col-span-2 space-y-6">
-          <div className="rounded-2xl border border-slate-200 p-5">
+          <div className="rounded-2xl border p-5" style={{ borderColor: 'color-mix(in srgb, var(--brand-secondary) 20%, #e2e8f0)' }}>
             <h3 className="text-lg font-semibold text-slate-900 mb-4">Brand Colors</h3>
             <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
               <ColorPicker label="Primary" value={data.primaryColor} onChange={(value) => onChange('primaryColor', value)} onExtractFromLogo={data.logo ? () => onChange('primaryColor', data.primaryColor || '#2563eb') : undefined} />
@@ -1933,7 +2019,7 @@ const BrandingSection = ({ data, onChange, onUpload }) => (
               <ColorPicker label="Accent" value={data.accentColor} onChange={(value) => onChange('accentColor', value)} onExtractFromLogo={data.logo ? () => onChange('accentColor', data.accentColor || '#f59e0b') : undefined} />
           </div>
           </div>
-          <div className="rounded-2xl border border-slate-200 p-5">
+          <div className="rounded-2xl border p-5" style={{ borderColor: 'color-mix(in srgb, var(--brand-secondary) 20%, #e2e8f0)' }}>
             <h3 className="text-lg font-semibold text-slate-900 mb-4">Brand Personality</h3>
           <FormField
               label="Persona"
@@ -1967,67 +2053,138 @@ const BrandingSection = ({ data, onChange, onUpload }) => (
 // Services Section Component
 const ServicesSection = ({ data, onChange, onNestedChange, onAddItem, onRemoveItem }) => (
   <div className="space-y-6">
-    <div className="bg-white dark:bg-slate-900/70/70 backdrop-blur-sm rounded-2xl border border-slate-200/60 shadow-xl p-6">
+    <div className="bg-white dark:bg-slate-900/70/70 backdrop-sm rounded-2xl border border-slate-200/60 shadow-xl p-6">
       <h2 className="text-2xl font-bold text-slate-900 mb-6">Services & Specialties</h2>
-      
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-        <div className="space-y-6">
-          <ArrayFieldEditor
-            label="Primary Services"
-            items={data.primaryServices}
-            onAdd={(item) => onAddItem('primaryServices', item)}
-            onRemove={(index) => onRemoveItem('primaryServices', index)}
-            placeholder="e.g., Roof Replacement"
+      <p className="text-sm text-slate-500 mb-4">Add your services, set a priority rank, and define price ranges. Use suggestions to prefill based on industry averages.</p>
+      <div className="space-y-3">
+        <div className="flex items-center gap-3">
+          <input
+            type="text"
+            className="flex-1 px-3 py-2 border border-slate-200 rounded-lg"
+            placeholder="Service name (e.g., Roof Replacement)"
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' && e.currentTarget.value.trim()) {
+                onAddItem('primaryServices', { id: Date.now().toString(), name: e.currentTarget.value.trim(), priority: (data.primaryServices?.length || 0) + 1, price_min: '', price_max: '', unit: 'project', notes: '' });
+                e.currentTarget.value = '';
+              }
+            }}
           />
-          
-          <ArrayFieldEditor
-            label="Specialties"
-            items={data.specialties}
-            onAdd={(item) => onAddItem('specialties', item)}
-            onRemove={(index) => onRemoveItem('specialties', index)}
-            placeholder="e.g., Storm Damage Repair"
-          />
-          
-          <ArrayFieldEditor
-            label="Certifications"
-            items={data.certifications}
-            onAdd={(item) => onAddItem('certifications', item)}
-            onRemove={(index) => onRemoveItem('certifications', index)}
-            placeholder="e.g., GAF Master Elite"
+          <button
+            type="button"
+            className="px-3 py-2 bg-blue-600 text-white rounded-lg text-sm"
+            onClick={() => onAddItem('primaryServices', { id: Date.now().toString(), name: 'New Service', priority: (data.primaryServices?.length || 0) + 1, price_min: '', price_max: '', unit: 'project', notes: '' })}
+          >
+            Add Service
+          </button>
+        </div>
+        <div className="divide-y divide-slate-200 rounded-xl border border-slate-200">
+          {(data.primaryServices || []).map((svc, idx) => (
+            <div key={svc.id || idx} className="p-4 grid grid-cols-1 md:grid-cols-12 gap-3 items-center">
+              <div className="md:col-span-3">
+                <input
+                  type="text"
+                  className="w-full px-3 py-2 border border-slate-200 rounded-lg"
+                  value={svc.name || ''}
+                  onChange={(e) => onAddItem('primaryServices', Object.assign((data.primaryServices || [])[idx], { name: e.target.value }))}
+                />
+                <div className="text-xs text-slate-500 mt-1">Priority
+                  <input
+                    type="number"
+                    min={1}
+                    className="ml-2 w-16 px-2 py-1 border border-slate-200 rounded"
+                    value={svc.priority || idx + 1}
+                    onChange={(e) => onAddItem('primaryServices', Object.assign((data.primaryServices || [])[idx], { priority: Number(e.target.value) }))}
           />
         </div>
-        
-        <div className="space-y-6">
-          <ArrayFieldEditor
-            label="Service Areas"
-            items={data.serviceAreas}
-            onAdd={(item) => onAddItem('serviceAreas', item)}
-            onRemove={(index) => onRemoveItem('serviceAreas', index)}
-            placeholder="e.g., Dallas, TX"
-          />
-          
-          <div>
-            <h3 className="text-lg font-semibold text-slate-900 mb-4">Pricing Information</h3>
-            <div className="space-y-4">
-              <FormField
-                label="Emergency Call-Out Fee"
-                value={data.pricing?.emergencyCallout || ''}
-                onChange={(value) => onNestedChange('pricing', 'emergencyCallout', value)}
-                placeholder="$150"
-              />
-              <FormField
-                label="Inspection Fee"
-                value={data.pricing?.inspectionFee || ''}
-                onChange={(value) => onNestedChange('pricing', 'inspectionFee', value)}
-                placeholder="$75"
-              />
-              <FormField
-                label="Typical Project Range"
-                value={data.pricing?.typicalProjectRange || ''}
-                onChange={(value) => onNestedChange('pricing', 'typicalProjectRange', value)}
-                placeholder="$8,000 - $25,000"
-              />
+              </div>
+              <div className="md:col-span-4">
+                <div className="text-xs text-slate-500 mb-1">Price range</div>
+                <div className="flex items-center gap-2">
+                  <input type="number" placeholder="Min" className="w-28 px-2 py-2 border border-slate-200 rounded-lg" value={svc.price_min || ''} onChange={(e) => onAddItem('primaryServices', Object.assign((data.primaryServices || [])[idx], { price_min: Number(e.target.value || 0) }))} />
+                  <span className="text-slate-500">—</span>
+                  <input type="number" placeholder="Max" className="w-28 px-2 py-2 border border-slate-200 rounded-lg" value={svc.price_max || ''} onChange={(e) => onAddItem('primaryServices', Object.assign((data.primaryServices || [])[idx], { price_max: Number(e.target.value || 0) }))} />
+                  <select className="px-2 py-2 border border-slate-200 rounded-lg" value={svc.unit || 'project'} onChange={(e) => onAddItem('primaryServices', Object.assign((data.primaryServices || [])[idx], { unit: e.target.value }))}>
+                    <option value="project">per project</option>
+                    <option value="sqft">per sqft</option>
+                    <option value="hour">per hour</option>
+                  </select>
+                </div>
+                {(svc.suggested_min || svc.suggested_max) && (
+                  <div className="text-xs text-emerald-600 mt-1">
+                    Suggested {svc.suggested_min ? `$${svc.suggested_min}` : ''}{svc.suggested_min && svc.suggested_max ? ' — ' : ''}{svc.suggested_max ? `$${svc.suggested_max}` : ''}
+                  </div>
+                )}
+              </div>
+              <div className="md:col-span-3">
+                <input type="text" placeholder="Notes" className="w-full px-3 py-2 border border-slate-200 rounded-lg" value={svc.notes || ''} onChange={(e) => onAddItem('primaryServices', Object.assign((data.primaryServices || [])[idx], { notes: e.target.value }))} />
+              </div>
+              <div className="md:col-span-2 flex gap-2 justify-end">
+                <button type="button" className="px-3 py-2 bg-emerald-600 text-white rounded-lg text-xs" onClick={() => onRemoveItem('primaryServices', idx)}>Remove</button>
+              </div>
             </div>
+          ))}
+        </div>
+        <div className="pt-3">
+          <button
+            type="button"
+            className="px-3 py-2 bg-purple-600 text-white rounded-lg text-sm"
+            onClick={async () => {
+              try {
+                const state = (window.localStorage.getItem('fm_company_state') || '').toUpperCase();
+                const services = (data.primaryServices || []).map((s) => ({ id: s.id, name: s.name, unit: s.unit }));
+                const { suggestions } = await businessProfileService.applySuggestions({ state, services, accept: [] });
+                const patched = (data.primaryServices || []).map((s) => {
+                  const key = String(s.id || s.name);
+                  const sug = suggestions?.[key];
+                  return sug ? { ...s, suggested_min: sug.suggested_min, suggested_max: sug.suggested_max, unit: s.unit || sug.unit } : s;
+                });
+                onChange('primaryServices', patched);
+                toast.success('Loaded pricing suggestions');
+              } catch (e) {
+                toast.error('Failed to load suggestions');
+              }
+            }}
+          >
+            Fetch pricing suggestions
+          </button>
+        </div>
+      </div>
+    </div>
+    <div className="bg-white dark:bg-slate-900/70/70 backdrop-sm rounded-2xl border border-slate-200/60 shadow-xl p-6">
+      <h3 className="text-xl font-semibold mb-2">Specialties & Areas</h3>
+      <p className="text-sm text-slate-500 mb-4">Add specialties and define service areas (city/zip/county).</p>
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div>
+          <div className="text-sm font-semibold mb-2">Specialties</div>
+          <div className="flex flex-wrap gap-2">
+            {(data.specialties || []).map((sp, idx) => (
+              <span key={sp.id || idx} className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-slate-100">
+                {sp.name}
+                <button type="button" className="text-xs text-red-600" onClick={() => onRemoveItem('specialties', idx)}>×</button>
+              </span>
+            ))}
+            </div>
+          <div className="mt-2 flex gap-2">
+            <input type="text" className="flex-1 px-3 py-2 border border-slate-200 rounded-lg" placeholder="Add specialty" onKeyDown={(e) => { if (e.key === 'Enter' && e.currentTarget.value.trim()) { onAddItem('specialties', { id: Date.now().toString(), name: e.currentTarget.value.trim(), priority: (data.specialties?.length || 0) + 1 }); e.currentTarget.value=''; } }} />
+          </div>
+        </div>
+        <div>
+          <div className="text-sm font-semibold mb-2">Service Areas</div>
+          <div className="space-y-2">
+            {(data.serviceAreas || []).map((area, idx) => (
+              <div key={area.id || idx} className="flex items-center gap-2">
+                <select className="px-2 py-2 border border-slate-200 rounded-lg" value={area.type || 'city'} onChange={(e) => onAddItem('serviceAreas', Object.assign((data.serviceAreas || [])[idx], { type: e.target.value }))}>
+                  <option value="city">City</option>
+                  <option value="zip">ZIP</option>
+                  <option value="county">County</option>
+                </select>
+                <input type="text" className="flex-1 px-3 py-2 border border-slate-200 rounded-lg" value={area.value || ''} onChange={(e) => onAddItem('serviceAreas', Object.assign((data.serviceAreas || [])[idx], { value: e.target.value }))} />
+                <button type="button" className="px-3 py-2 bg-emerald-600 text-white rounded-lg text-xs" onClick={() => onRemoveItem('serviceAreas', idx)}>Remove</button>
+      </div>
+            ))}
+          </div>
+          <div className="mt-2 flex gap-2">
+            <button type="button" className="px-3 py-2 bg-blue-600 text-white rounded-lg text-sm" onClick={() => onAddItem('serviceAreas', { id: Date.now().toString(), type: 'city', value: '' })}>Add Area</button>
           </div>
         </div>
       </div>
@@ -2036,9 +2193,9 @@ const ServicesSection = ({ data, onChange, onNestedChange, onAddItem, onRemoveIt
 );
 
 // Portfolio Section Component
-const PortfolioSection = ({ data, onChange, onAddItem, onRemoveItem }) => (
+const PortfolioSection = ({ data, onChange, onAddItem, onRemoveItem, knowledgeItems = [], onKnowledgeChange = () => {} }) => (
   <div className="space-y-6">
-    <div className="bg-white dark:bg-slate-900/70/70 backdrop-blur-sm rounded-2xl border border-slate-200/60 shadow-xl p-6">
+    <div className="bg-white dark:bg-slate-900/70/70 backdrop-sm rounded-2xl border border-slate-200/60 shadow-xl p-6">
       <h2 className="text-2xl font-bold text-slate-900 mb-6">Portfolio & Case Studies</h2>
       
       <div className="space-y-8">
@@ -2053,6 +2210,12 @@ const PortfolioSection = ({ data, onChange, onAddItem, onRemoveItem }) => (
           onAdd={(testimonial) => onAddItem('testimonials', testimonial)}
           onRemove={(index) => onRemoveItem('testimonials', index)}
         />
+
+        <div className="rounded-2xl border border-slate-200 p-5">
+          <h3 className="text-lg font-semibold text-slate-900 mb-2">AI Knowledge Base</h3>
+          <p className="text-sm text-slate-500 mb-4">Upload sales collateral, pricing sheets, warranties, or scripts. Add a note so AI knows when and how to use it.</p>
+          <KnowledgeUploader items={knowledgeItems} onChange={onKnowledgeChange} />
+        </div>
       </div>
     </div>
   </div>
@@ -2061,7 +2224,7 @@ const PortfolioSection = ({ data, onChange, onAddItem, onRemoveItem }) => (
 // AI Messaging Section Component
 const AIMessagingSection = ({ data, onChange, onAddItem, onRemoveItem, businessData }) => (
   <div className="space-y-6">
-    <div className="bg-white dark:bg-slate-900/70/70 backdrop-blur-sm rounded-2xl border border-slate-200/60 shadow-xl p-6">
+    <div className="bg-white dark:bg-slate-900/70/70 backdrop-sm rounded-2xl border border-slate-200/60 shadow-xl p-6">
       <div className="flex items-center space-x-3 mb-6">
         <div className="w-10 h-10 bg-gradient-to-br from-purple-500 to-pink-500 rounded-xl flex items-center justify-center">
           <Bot size={20} className="text-white" />
@@ -2116,6 +2279,8 @@ const AIMessagingSection = ({ data, onChange, onAddItem, onRemoveItem, businessD
             businessData={businessData}
             agentConfig={data}
           />
+
+          {/* Knowledge base displayed/managed on Portfolio tab; shown here as read-only summary in future */}
         </div>
       </div>
     </div>
@@ -2125,7 +2290,7 @@ const AIMessagingSection = ({ data, onChange, onAddItem, onRemoveItem, businessD
 // Integrations Section Component
 const IntegrationsSection = ({ data, onChange, onNestedChange }) => (
   <div className="space-y-6">
-    <div className="bg-white dark:bg-slate-900/70/70 backdrop-blur-sm rounded-2xl border border-slate-200/60 shadow-xl p-6">
+    <div className="bg-white dark:bg-slate-900/70/70 backdrop-sm rounded-2xl border border-slate-200/60 shadow-xl p-6">
       <h2 className="text-2xl font-bold text-slate-900 mb-6">Integrations & Connections</h2>
       
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
@@ -2222,40 +2387,21 @@ const ColorPicker = ({ label, value, onChange, onExtractFromLogo }) => (
   <div>
     <div className="flex items-center justify-between mb-2">
       <label className="block text-sm font-medium text-slate-700">{label}</label>
-      {onExtractFromLogo && (
-        <button
-          type="button"
-          onClick={onExtractFromLogo}
-          className="text-xs font-semibold text-blue-600 hover:text-blue-700"
-        >
-          Use logo colors
-        </button>
-      )}
+      {onExtractFromLogo && null}
     </div>
     <div className="flex items-center gap-4">
-      <div className="relative">
       <input
         type="color"
         value={value}
         onChange={(e) => onChange(e.target.value)}
-          className="w-14 h-14 rounded-full border-2 border-slate-200 cursor-pointer"
-        />
-        <div className="absolute -bottom-2 left-1/2 -translate-x-1/2 text-[10px] bg-white px-1 rounded border border-slate-200 text-slate-500">
-          {value}
-        </div>
-      </div>
-      <div className="flex gap-2">
-        {["#0ea5e9", "#1e293b", "#f59e0b", "#ef4444", "#10b981", "#8b5cf6"].map((sw) => (
-          <button
-            key={sw}
-            onClick={() => onChange(sw)}
-            type="button"
-            className="w-8 h-8 rounded-full border-2 border-white shadow ring-1 ring-slate-200"
-            style={{ backgroundColor: sw }}
-            title={sw}
-          />
-        ))}
-      </div>
+        className="w-14 h-14 rounded-full border-2 border-slate-200 cursor-pointer"
+      />
+      <input
+        type="text"
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        className="w-28 px-2 py-2 border border-slate-200 rounded-lg text-xs"
+      />
     </div>
   </div>
 );
@@ -2318,25 +2464,26 @@ const ArrayFieldEditor = ({ label, items, onAdd, onRemove, placeholder, textarea
 
 // Additional specialized components would go here...
 const LogoUploader = ({ currentLogo, onUpload }) => (
-  <div className="border-2 border-dashed border-slate-300 rounded-lg p-6 text-center">
+  <div className="border border-slate-200 rounded-2xl p-5">
+    <div className="flex items-center gap-4">
+      <div className="h-16 w-16 rounded-xl bg-slate-100 flex items-center justify-center overflow-hidden border">
     {currentLogo ? (
-      <div>
-        <img src={currentLogo} alt="Logo" className="h-20 mx-auto mb-4" />
-        <button className="text-blue-600 dark:text-blue-300 hover:text-blue-700 text-sm">Change Logo</button>
+          <img src={currentLogo} alt="Logo" className="h-full w-full object-cover" />
+        ) : (
+          <Upload className="w-6 h-6 text-slate-400" />
+        )}
       </div>
-    ) : (
-      <div>
-        <Upload size={48} className="mx-auto text-slate-400 mb-4" />
-        <p className="text-slate-600 mb-2">Upload your logo</p>
-        <p className="text-sm text-slate-500">PNG, JPG up to 2MB</p>
-        <input
-          type="file"
-          accept="image/*"
-          onChange={(e) => onUpload(e.target.files[0])}
-          className="mt-4"
-        />
+      <div className="flex-1">
+        <div className="text-sm text-slate-600">Upload your logo</div>
+        <div className="text-xs text-slate-500">PNG, JPG up to 2MB</div>
       </div>
-    )}
+      <div>
+        <input id="logo-upload" type="file" accept="image/*" className="hidden" onChange={(e) => e.target.files?.[0] && onUpload(e.target.files[0])} />
+        <label htmlFor="logo-upload" className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-slate-900 text-white text-sm cursor-pointer shadow hover:bg-slate-800">
+          <Upload className="w-4 h-4" /> {currentLogo ? 'Change Logo' : 'Upload Logo'}
+        </label>
+      </div>
+    </div>
   </div>
 );
 
@@ -2392,15 +2539,24 @@ const BrandPreviewCard = ({ colors = {}, logo, personality }) => (
 
 const CaseStudyManager = ({ caseStudies = [], onAdd, onRemove, onChange }) => {
   const [draft, setDraft] = useState({ title: '', location: '', date: '', scope: '', challenge: '', solution: '', results: '', images: [], beforeAfter: [] });
+  const [galleryMode, setGalleryMode] = useState('grid');
+
   const addImage = async (file) => {
     const form = new FormData();
     form.append('file', file);
     const res = await fetch('/api/uploads', { method: 'POST', body: form });
     if (res.ok) {
       const data = await res.json();
-      setDraft((d) => ({ ...d, images: [...(d.images || []), data.url] }));
+      setDraft((d) => ({
+        ...d,
+        images: [
+          ...((d.images || []).map((img) => (typeof img === 'string' ? { url: img, caption: '', useInReports: true, useInEmail: true } : img))),
+          { url: data.url, caption: '', useInReports: true, useInEmail: true },
+        ],
+      }));
     }
   };
+
   const addBeforeAfter = async (beforeFile, afterFile) => {
     const upload = async (f) => {
       const form = new FormData();
@@ -2410,7 +2566,13 @@ const CaseStudyManager = ({ caseStudies = [], onAdd, onRemove, onChange }) => {
     };
     const beforeUrl = beforeFile ? await upload(beforeFile) : '';
     const afterUrl = afterFile ? await upload(afterFile) : '';
-    setDraft((d) => ({ ...d, beforeAfter: [...(d.beforeAfter || []), { before: beforeUrl, after: afterUrl, caption: '' }] }));
+    setDraft((d) => ({
+      ...d,
+      beforeAfter: [
+        ...((d.beforeAfter || []).map((pair) => ({ ...pair, useInReports: pair.useInReports ?? true, useInEmail: pair.useInEmail ?? true }))),
+        { before: beforeUrl, after: afterUrl, caption: '', useInReports: true, useInEmail: true },
+      ],
+    }));
   };
   const save = () => {
     if (!draft.title.trim()) return;
@@ -2446,27 +2608,96 @@ const CaseStudyManager = ({ caseStudies = [], onAdd, onRemove, onChange }) => {
           <div>
             <label className="block text-sm font-medium text-slate-700 mb-2">Project Photos (optional)</label>
             <div className="flex items-center gap-3">
-              <input type="file" accept="image/*" multiple onChange={(e) => Array.from(e.target.files || []).forEach(addImage)} />
+              <input id="photos-upload" type="file" accept="image/*" multiple className="hidden" onChange={(e) => Array.from(e.target.files || []).forEach(addImage)} />
+              <label htmlFor="photos-upload" className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-slate-900 text-white text-sm cursor-pointer shadow hover:bg-slate-800">
+                <Upload className="w-4 h-4" /> Upload photos
+              </label>
+              <div className="ml-auto flex items-center gap-2 text-sm">
+                <span className="text-slate-500">View:</span>
+                <button type="button" onClick={() => setGalleryMode('grid')} className={`px-2 py-1 rounded ${galleryMode === 'grid' ? 'bg-slate-200' : 'hover:bg-slate-100'}`}>Grid</button>
+                <button type="button" onClick={() => setGalleryMode('slider')} className={`px-2 py-1 rounded ${galleryMode === 'slider' ? 'bg-slate-200' : 'hover:bg-slate-100'}`}>Slider</button>
             </div>
+            </div>
+            {galleryMode === 'grid' ? (
             <div className="mt-3 grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3">
-              {(draft.images || []).map((url, i) => (
-                <img key={`${url}-${i}`} src={url} alt="" className="h-28 w-full object-cover rounded-xl border" />
-              ))}
+                {(draft.images || []).map((img, i) => {
+                  const image = typeof img === 'string' ? { url: img } : img;
+                  return (
+                    <div key={`img-${i}`} className="rounded-xl border p-2 space-y-2">
+                      <img src={image.url} alt="" className="h-28 w-full object-cover rounded-lg border" />
+                      <input
+                        type="text"
+                        className="w-full px-2 py-1 border border-slate-200 rounded text-xs"
+                        placeholder="Caption for AI (e.g., materials, special details)"
+                        value={image.caption || ''}
+                        onChange={(e) => setDraft((d) => {
+                          const next = [...(d.images || [])];
+                          const obj = typeof next[i] === 'string' ? { url: next[i] } : { ...next[i] };
+                          obj.caption = e.target.value;
+                          next[i] = obj;
+                          return { ...d, images: next };
+                        })}
+                      />
+                      <div className="flex items-center justify-between text-[11px]">
+                        <label className="inline-flex items-center gap-1">
+                          <input type="checkbox" checked={(image.useInReports ?? true)} onChange={(e) => setDraft((d) => { const next = [...(d.images || [])]; const obj = typeof next[i] === 'string' ? { url: next[i] } : { ...next[i] }; obj.useInReports = e.target.checked; next[i] = obj; return { ...d, images: next }; })} /> Reports
+                        </label>
+                        <label className="inline-flex items-center gap-1">
+                          <input type="checkbox" checked={(image.useInEmail ?? true)} onChange={(e) => setDraft((d) => { const next = [...(d.images || [])]; const obj = typeof next[i] === 'string' ? { url: next[i] } : { ...next[i] }; obj.useInEmail = e.target.checked; next[i] = obj; return { ...d, images: next }; })} /> Email
+                        </label>
+                        <button type="button" className="text-red-500 hover:text-red-700" onClick={() => setDraft((d) => ({ ...d, images: (d.images || []).filter((_, idx) => idx !== i) }))}>Remove</button>
             </div>
+                    </div>
+                  );
+                })}
+              </div>
+            ) : (
+              <div className="mt-3 overflow-x-auto flex gap-4 pb-2 snap-x snap-mandatory">
+                {(draft.images || []).map((img, i) => {
+                  const image = typeof img === 'string' ? { url: img } : img;
+                  return (
+                    <div key={`slide-${i}`} className="min-w-[240px] snap-center rounded-xl border p-2">
+                      <img src={image.url} alt="" className="h-40 w-full object-cover rounded-lg border" />
+                      <div className="mt-2 text-xs text-slate-500">{image.caption || '—'}</div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
           </div>
           <div>
             <label className="block text-sm font-medium text-slate-700 mb-2">Before / After (optional)</label>
             <div className="flex flex-col sm:flex-row sm:items-center gap-2">
-              <input type="file" accept="image/*" onChange={(e) => (window._ba_before = e.target.files?.[0])} />
+              <input id="ba-before" type="file" accept="image/*" className="hidden" onChange={(e) => (window._ba_before = e.target.files?.[0])} />
+              <label htmlFor="ba-before" className="px-3 py-2 text-sm rounded-lg bg-slate-900 text-white cursor-pointer">Select Before</label>
               <span className="text-slate-400 text-sm sm:px-2">→</span>
-              <input type="file" accept="image/*" onChange={(e) => (window._ba_after = e.target.files?.[0])} />
-              <button type="button" onClick={() => addBeforeAfter(window._ba_before, window._ba_after)} className="px-3 py-2 text-sm bg-slate-900 text-white rounded-lg">Add Pair</button>
+              <input id="ba-after" type="file" accept="image/*" className="hidden" onChange={(e) => (window._ba_after = e.target.files?.[0])} />
+              <label htmlFor="ba-after" className="px-3 py-2 text-sm rounded-lg bg-slate-900 text-white cursor-pointer">Select After</label>
+              <button type="button" onClick={() => addBeforeAfter(window._ba_before, window._ba_after)} className="px-3 py-2 text-sm bg-emerald-600 text-white rounded-lg">Add Pair</button>
             </div>
             <div className="mt-3 grid grid-cols-1 md:grid-cols-2 gap-3">
               {(draft.beforeAfter || []).map((pair, i) => (
-                <div key={`ba-${i}`} className="grid grid-cols-2 gap-2">
+                <div key={`ba-${i}`} className="rounded-xl border p-2 space-y-2">
+                  <div className="grid grid-cols-2 gap-2">
                   <img src={pair.before} alt="Before" className="h-24 w-full object-cover rounded-xl border" />
                   <img src={pair.after} alt="After" className="h-24 w-full object-cover rounded-xl border" />
+                  </div>
+                  <input
+                    type="text"
+                    className="w-full px-2 py-1 border border-slate-200 rounded text-xs"
+                    placeholder="Caption for AI (what changed, materials, outcomes)"
+                    value={pair.caption || ''}
+                    onChange={(e) => setDraft((d) => { const next = [...(d.beforeAfter || [])]; next[i] = { ...next[i], caption: e.target.value }; return { ...d, beforeAfter: next }; })}
+                  />
+                  <div className="flex items-center justify-between text-[11px]">
+                    <label className="inline-flex items-center gap-1">
+                      <input type="checkbox" checked={(pair.useInReports ?? true)} onChange={(e) => setDraft((d) => { const next = [...(d.beforeAfter || [])]; next[i] = { ...next[i], useInReports: e.target.checked }; return { ...d, beforeAfter: next }; })} /> Reports
+                    </label>
+                    <label className="inline-flex items-center gap-1">
+                      <input type="checkbox" checked={(pair.useInEmail ?? true)} onChange={(e) => setDraft((d) => { const next = [...(d.beforeAfter || [])]; next[i] = { ...next[i], useInEmail: e.target.checked }; return { ...d, beforeAfter: next }; })} /> Email
+                    </label>
+                    <button type="button" className="text-red-500 hover:text-red-700" onClick={() => setDraft((d) => ({ ...d, beforeAfter: (d.beforeAfter || []).filter((_, idx) => idx !== i) }))}>Remove</button>
+                  </div>
                 </div>
               ))}
             </div>
@@ -2529,8 +2760,11 @@ const TestimonialManager = ({ testimonials = [], onAdd, onRemove }) => {
       <FormField label="Quote" textarea value={draft.quote} onChange={(v) => setDraft((d) => ({ ...d, quote: v }))} placeholder="They handled everything—zero stress and a beautiful roof!" />
       <div>
         <label className="block text-sm font-medium text-slate-700 mb-2">Avatar</label>
-        <input type="file" accept="image/*" onChange={(e) => e.target.files?.[0] && addAvatar(e.target.files[0])} />
-        {draft.avatar && <img src={draft.avatar} alt="Avatar" className="h-12 w-12 rounded-full mt-2" />}
+        <input id="avatar-upload" type="file" accept="image/*" className="hidden" onChange={(e) => e.target.files?.[0] && addAvatar(e.target.files[0])} />
+        <label htmlFor="avatar-upload" className="inline-flex items-center gap-2 px-3 py-2 rounded-lg bg-slate-900 text-white text-sm cursor-pointer shadow hover:bg-slate-800">
+          <Upload className="w-4 h-4" /> {draft.avatar ? 'Change Avatar' : 'Upload Avatar'}
+        </label>
+        {draft.avatar && <img src={draft.avatar} alt="Avatar" className="h-12 w-12 rounded-full mt-2 border" />}
       </div>
       <div className="flex items-center justify-end">
         <button onClick={save} className="px-3 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-sm">Add Testimonial</button>
@@ -2575,5 +2809,72 @@ const MessageTemplateGenerator = ({ businessData, agentConfig }) => (
   </div>
 );
 const BrandPreview = ({ businessProfile, onClose }) => <div>Brand Preview Modal</div>;
+
+const KnowledgeUploader = ({ items = [], onChange }) => {
+  const [draft, setDraft] = useState({ title: '', note: '', url: '' });
+  const uploadFile = async (file) => {
+    const form = new FormData();
+    form.append('file', file);
+    const res = await fetch('/api/uploads', { method: 'POST', body: form });
+    if (res.ok) {
+      const data = await res.json();
+      setDraft((d) => ({ ...d, url: data.url }));
+    }
+  };
+  const add = () => {
+    if (!draft.url || !draft.title.trim()) return;
+    const next = [...items, { id: `${Date.now()}`, ...draft }];
+    onChange(next);
+    if (typeof window !== 'undefined') {
+      window.localStorage.setItem('fm_ai_knowledge', JSON.stringify(next));
+    }
+    setDraft({ title: '', note: '', url: '' });
+  };
+  const remove = (id) => {
+    const next = items.filter((x) => x.id !== id);
+    onChange(next);
+    if (typeof window !== 'undefined') {
+      window.localStorage.setItem('fm_ai_knowledge', JSON.stringify(next));
+    }
+  };
+  return (
+    <div className="space-y-3">
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+        <div>
+          <label className="block text-sm font-medium text-slate-700 mb-1">Title</label>
+          <input type="text" value={draft.title} onChange={(e) => setDraft((d) => ({ ...d, title: e.target.value }))} className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent" placeholder="e.g., Premium Warranty PDF" />
+        </div>
+        <div className="md:col-span-2">
+          <label className="block text-sm font-medium text-slate-700 mb-1">How AI should use this</label>
+          <input type="text" value={draft.note} onChange={(e) => setDraft((d) => ({ ...d, note: e.target.value }))} className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent" placeholder="Use when homeowner asks about warranty coverage and terms" />
+        </div>
+      </div>
+      <div className="flex items-center gap-3">
+        <input id="kb-upload" type="file" className="hidden" onChange={(e) => e.target.files?.[0] && uploadFile(e.target.files[0])} />
+        <label htmlFor="kb-upload" className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-slate-900 text-white text-sm cursor-pointer shadow hover:bg-slate-800">
+          <Upload className="w-4 h-4" /> {draft.url ? 'Replace File' : 'Upload File'}
+        </label>
+        {draft.url && (
+          <a href={draft.url} target="_blank" rel="noreferrer" className="text-sm text-blue-600 hover:text-blue-700 underline">Preview</a>
+        )}
+        <button onClick={add} className="ml-auto px-4 py-2 rounded-xl bg-blue-600 text-white text-sm hover:bg-blue-700">Add to knowledge</button>
+      </div>
+      <div className="mt-2 divide-y divide-slate-200 rounded-xl border border-slate-200">
+        {(items || []).map((it) => (
+          <div key={it.id} className="p-3 flex items-center justify-between gap-3">
+            <div className="min-w-0">
+              <div className="text-sm font-medium truncate">{it.title}</div>
+              <div className="text-xs text-slate-500 truncate">{it.note}</div>
+            </div>
+            <div className="flex items-center gap-2">
+              <a href={it.url} target="_blank" rel="noreferrer" className="text-sm text-blue-600 hover:text-blue-700">Open</a>
+              <button onClick={() => remove(it.id)} className="text-sm text-red-600 hover:text-red-700">Remove</button>
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+};
 
 export default ComprehensiveBusinessSettings;

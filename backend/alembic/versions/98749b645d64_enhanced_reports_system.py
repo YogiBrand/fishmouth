@@ -49,6 +49,7 @@ def upgrade() -> None:
         sa.Column('tokens_used', sa.INTEGER()),
         sa.Column('cost_cents', sa.INTEGER()),
         sa.Column('quality_score', sa.FLOAT()),
+        sa.Column('prompt_signature', sa.TEXT()),
         sa.Column('timestamp', sa.TIMESTAMP(), server_default=sa.text('CURRENT_TIMESTAMP')),
         sa.PrimaryKeyConstraint('id'),
         sa.ForeignKeyConstraint(['report_id'], ['reports.id'], ondelete='SET NULL'),

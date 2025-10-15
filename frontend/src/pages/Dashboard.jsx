@@ -35,6 +35,7 @@ import { useNavigate } from 'react-router-dom';
 
 import LeadIntelligenceTable from '../components/LeadIntelligenceTable';
 import AreaScanner from '../components/AreaScanner';
+import ManualAddressWizard from '../components/ManualAddressWizard';
 import VoiceCallManager from '../components/VoiceCallManager';
 import SequenceManager from '../components/SequenceManager';
 import EnhancedLeadDetailPage from '../components/EnhancedLeadDetailPage';
@@ -437,10 +438,7 @@ export default function Dashboard() {
   const [clusterSummaries, setClusterSummaries] = useState([]);
   const [scannerTableLoading, setScannerTableLoading] = useState(false);
   const [activity, setActivity] = useState([]);
-  const [usageSummary, setUsageSummary] = useState({});
   const [roiSummary, setRoiSummary] = useState(null);
-  const [dashboardErrors, setDashboardErrors] = useState([]);
-  const [taskReminders, setTaskReminders] = useState([]);
   const [summaryGeneratedAt, setSummaryGeneratedAt] = useState(null);
   const [loading, setLoading] = useState(true);
   const [sequences, setSequences] = useState([]);
@@ -1589,12 +1587,14 @@ const notifications = useMemo(() => {
     { id: 'dashboard', label: 'Dashboard', icon: Home, description: 'Your roofing business overview' },
     { id: 'leads', label: 'Hot Leads', icon: Users, description: 'Leads that need immediate attention', badge: totalLeadBadge },
     { id: 'scanner', label: 'Roof Scanner', icon: Scan, description: 'Analyze properties for damage', badge: clusterBadge },
+    { id: 'address_lookup', label: 'Address Lookup', icon: MapPin, description: 'Run a manual SmartScan for any address' },
     { id: 'reports', label: 'Customer Reports', icon: FileText, description: 'Generate homeowner-ready dossiers' },
     { id: 'calls', label: 'Call Log', icon: Phone, description: 'Track customer conversations' },
     { id: 'sequences', label: 'Follow-up', icon: Mail, description: 'Automated customer nurturing' },
     { id: 'analytics', label: 'Business Metrics', icon: Sparkles, description: 'Track performance and ROI' },
     { id: 'help', label: 'Help Center', icon: LifeBuoy, description: 'Guided answers & live support' },
     { id: 'activity', label: 'Notifications', icon: Bell, description: 'Live intelligence feed' },
+    { id: 'settings', label: 'Business Settings', icon: Settings, description: 'Brand, services, messaging configuration' },
   ];
 
   const activeNav = navItems.find((item) => item.id === activeView);
@@ -2116,37 +2116,12 @@ const notifications = useMemo(() => {
       replies_7d: { label: 'Replies / Clicks', value: 21, period: '7d' },
       appointments_7d: { label: 'Appointments', value: 11, period: '7d' },
     });
-    setUsageSummary({
-      voice_minutes: { quantity: 184, cost: 36.8 },
-      sms_messages: { quantity: 245, cost: 19.6 },
-      emails_sent: { quantity: 420, cost: 37.8 },
-    });
     setRoiSummary({
       spend_last_30: 420,
       pipeline_value: 128000,
       closed_value: 38500,
       roi_percent: 204,
     });
-    setDashboardErrors([
-      { type: 'message.bounced', count: 2, last_seen: new Date().toISOString() },
-      { type: 'call.failed', count: 1, last_seen: new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString() },
-    ]);
-    setTaskReminders([
-      {
-        id: 'task-followup-1',
-        lead_id: 1,
-        task_type: 'schedule_follow_up',
-        scheduled_for: new Date(Date.now() + 2 * 60 * 60 * 1000).toISOString(),
-        created_at: new Date().toISOString(),
-      },
-      {
-        id: 'task-inspection-1',
-        lead_id: 2,
-        task_type: 'inspection_site_walk',
-        scheduled_for: new Date(Date.now() + 20 * 60 * 60 * 1000).toISOString(),
-        created_at: new Date().toISOString(),
-      },
-    ]);
     setSummaryGeneratedAt(new Date().toISOString());
 
     const now = new Date();
@@ -2394,10 +2369,7 @@ const notifications = useMemo(() => {
     if (Array.isArray(data.clusters)) {
       setClusters(data.clusters);
     }
-    setUsageSummary(data.usage || {});
     setRoiSummary(data.roi || null);
-    setDashboardErrors(data.errors_24h || []);
-    setTaskReminders(data.tasks || []);
     setSummaryGeneratedAt(data.generated_at || null);
   };
 
@@ -2458,6 +2430,23 @@ const notifications = useMemo(() => {
       throw error;
     }
   };
+
+  const handleManualLeadCreated = useCallback(
+    async (response) => {
+      try {
+        await Promise.all([refreshLeadList(), refreshHotLeads(), refreshActivity()]);
+        awardPoints(30, 'Manual SmartScan completed', {
+          type: 'manual_scan',
+          leadId: response?.lead?.id,
+        });
+        toast.success('Manual SmartScan lead added to your pipeline.');
+      } catch (error) {
+        console.error('Failed to refresh data after manual SmartScan', error);
+        toast.error('Lead created, but dashboard refresh encountered an issue. Try reloading.');
+      }
+    },
+    [refreshLeadList, refreshHotLeads, refreshActivity, awardPoints]
+  );
 
   const handleGenerateReport = useCallback(
     (leadId = null, _template = 'lead_dossier', leadDetails = null) => {
@@ -3168,12 +3157,6 @@ const notifications = useMemo(() => {
         const primaryUrgentLead = primaryUrgentEntry?.lead || null;
         const primaryUrgency = primaryUrgentEntry?.urgency || null;
         const primaryLeadAgeLabel = primaryUrgency ? formatLeadAgeLabel(primaryUrgency.hoursOld) : '—';
-        const leadForCall =
-          leadsWithUrgency.find(
-            (entry) => entry.lead && (entry.lead.homeowner_phone || entry.lead.phone || entry.lead.homeowner_phone_encrypted)
-          )?.lead || null;
-        const leadForEmail =
-          leadsWithUrgency.find((entry) => entry.lead && (entry.lead.homeowner_email || entry.lead.email))?.lead || null;
         const respondHeadline = criticalLeads.length
           ? `URGENT: ${criticalLeads.length} Hot Lead${criticalLeads.length === 1 ? '' : 's'} Need Response Today`
           : urgentCount > 0
@@ -3298,17 +3281,6 @@ const notifications = useMemo(() => {
         return (
           <div className="space-y-8">
             <div className="space-y-4">
-              <DashboardKpiRow kpiConfig={appConfig.kpis} kpiData={kpiData} isDark={isDark} />
-              <LeadQueueTabs
-                tabs={appConfig.leadQueueTabs}
-                leadQueue={leadQueue}
-                columns={appConfig.leadTableColumns}
-                isDark={isDark}
-                onOpenLead={handleInspectLead}
-                onCallLead={handleCallLeadDirect}
-                onAssignSequence={handleAssignSequence}
-                onGenerateReport={handleGenerateReport}
-              />
               {summaryGeneratedAt && (
                 <div className={`text-xs text-right ${mutedClass}`}>
                   Updated {new Date(summaryGeneratedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
@@ -3447,24 +3419,12 @@ const notifications = useMemo(() => {
                 maxVisible={MAX_HERO_LEADS}
                 recentlyRewardedLeadId={recentlyRewardedLeadId}
                 isDark={isDark}
-              />
-            )}
-
-            <div className={`${surfaceClass(isDark)} p-6`}>
-              <LeadQueueTabs
-                tabs={appConfig.leadQueueTabs}
+                leadQueueTabs={appConfig.leadQueueTabs}
                 leadQueue={leadQueue}
-                columns={appConfig.leadTableColumns}
-                isDark={isDark}
-                onOpenLead={(lead) => {
-                  setSelectedMapLeadId(lead.id);
-                  handleInspectLead(lead);
-                }}
-                onCallLead={handleCallLeadDirect}
-                onAssignSequence={handleAssignSequence}
+                leadTableColumns={appConfig.leadTableColumns}
                 onGenerateReport={(leadId, _template, lead) => handleGenerateReport(leadId, undefined, lead)}
               />
-            </div>
+            )}
 
             {/* Gamified progress */}
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
@@ -3789,7 +3749,9 @@ const notifications = useMemo(() => {
           <div className="space-y-6">
             <header>
               <h1 className={`text-3xl font-bold ${headingClass}`}>Scanner & Heat Clusters</h1>
-              <p className={`text-sm ${mutedClass}`}>Scan new territories and monitor neighbourhood contagion in a single command center.</p>
+              <p className={`text-sm ${mutedClass}`}>
+                Scan new territories and monitor neighbourhood contagion in a single command center.
+              </p>
             </header>
             <div className={`${surfaceClass(isDark)} p-6`}>
               <AreaScanner
@@ -3806,6 +3768,27 @@ const notifications = useMemo(() => {
               clusterCount={clusterSummaries.length}
               loading={scannerTableLoading}
               onRowNavigate={(row) => navigate(row.link)}
+            />
+          </div>
+        );
+      
+      case 'address_lookup':
+        return (
+          <div className="space-y-6">
+            <header>
+              <h1 className={`text-3xl font-bold ${headingClass}`}>Address Lookup</h1>
+              <p className={`text-sm ${mutedClass}`}>
+                Drop a single address to run an on-demand SmartScan—AI imagery, scoring, and homeowner-ready assets in one flow.
+              </p>
+            </header>
+            <ManualAddressWizard
+              isDark={isDark}
+              theme={{
+                panel: surfaceClass(isDark),
+                heading: headingClass,
+                muted: mutedClass,
+              }}
+              onLeadCreated={handleManualLeadCreated}
             />
           </div>
         );
