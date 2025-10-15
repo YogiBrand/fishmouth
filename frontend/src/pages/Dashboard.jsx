@@ -21,7 +21,6 @@ import {
   Sun,
   Moon,
   X,
-  ArrowUpRight,
   LifeBuoy,
   Wallet,
   Coins,
@@ -32,6 +31,7 @@ import {
 } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import toast from 'react-hot-toast';
+import { useNavigate } from 'react-router-dom';
 
 import LeadIntelligenceTable from '../components/LeadIntelligenceTable';
 import AreaScanner from '../components/AreaScanner';
@@ -49,11 +49,14 @@ import ManualReviewModal from '../components/ManualReviewModal';
 import DashboardKpiRow from '../components/DashboardKpiRow';
 import LeadQueueTabs from '../components/LeadQueueTabs';
 import WelcomeCelebration from '../components/WelcomeCelebration';
-import { leadAPI } from '../services/api';
+import { leadAPI, walletAPI } from '../services/api';
 import businessProfileService from '../services/businessProfileService';
-import { getLeadUrgency, formatLeadAgeLabel, resolveLeadCreatedAt } from '../utils/leads';
+import { getLeadUrgency, formatLeadAgeLabel, resolveLeadCreatedAt, getLeadAgeHours } from '../utils/leads';
+import { mockRecentScans, mockHeatClusters } from '../data/mockLeads';
+import ScannerActivityTable, { buildScannerRows } from '../components/ScannerActivityTable';
 
 const LEVEL_THRESHOLDS = [0, 250, 650, 1200, 1900, 2800, 3900, 5200, 6700, 8400];
+const DAILY_POINTS_CAP = 750;
 const DAILY_LOGIN_BONUS = 100;
 const POINTS_PER_LEAD = 100;
 const POINTS_PER_DOLLAR = 25;
@@ -346,6 +349,7 @@ const NOTIFICATION_PRIORITY = {
   lead_captured: 2,
   sequence_enrolled: 2,
   level_up: 1,
+  promotion: 1,
   default: 3,
 };
 
@@ -371,6 +375,7 @@ const NOTIFICATION_VISUALS = {
   lead_captured: { icon: Users, tone: 'text-orange-500 bg-orange-500/10' },
   sequence_enrolled: { icon: Mail, tone: 'text-indigo-500 bg-indigo-500/10' },
   level_up: { icon: Gift, tone: 'text-amber-500 bg-amber-500/10' },
+  promotion: { icon: Gift, tone: 'text-emerald-500 bg-emerald-500/10' },
   default: { icon: Sparkles, tone: 'text-slate-500 bg-slate-500/10' },
 };
 
@@ -428,6 +433,9 @@ export default function Dashboard() {
   const [leadList, setLeadList] = useState([]);
   const [leadLoading, setLeadLoading] = useState(true);
   const [clusters, setClusters] = useState([]);
+  const [scanSummaries, setScanSummaries] = useState([]);
+  const [clusterSummaries, setClusterSummaries] = useState([]);
+  const [scannerTableLoading, setScannerTableLoading] = useState(false);
   const [activity, setActivity] = useState([]);
   const [usageSummary, setUsageSummary] = useState({});
   const [roiSummary, setRoiSummary] = useState(null);
@@ -480,12 +488,51 @@ export default function Dashboard() {
   const [celebrationMessage, setCelebrationMessage] = useState('');
   const [celebrationQuote, setCelebrationQuote] = useState('');
   const [pointBursts, setPointBursts] = useState([]);
+  const [walletPromotions, setWalletPromotions] = useState(() => getStoredObject('fm_wallet_promotions', []));
+  const promotionsRef = useRef(walletPromotions);
+  const pointsLedgerRef = useRef(getStoredObject('fm_points_daily', { date: getTodayKey(), total: 0 }));
+  if (pointsLedgerRef.current && typeof pointsLedgerRef.current.total !== 'number') {
+    pointsLedgerRef.current.total = Number(pointsLedgerRef.current.total) || 0;
+  }
+  const initialPromoLevels = getStoredObject('fm_promo_levels', []);
+  const issuedPromotionLevelsRef = useRef(
+    new Set(Array.isArray(initialPromoLevels) ? initialPromoLevels : [])
+  );
+  const walletOpenCounterRef = useRef(getStoredNumber('fm_wallet_open_count', 0));
+  const walletEngagementTriggeredRef = useRef(Boolean(getStoredNumber('fm_wallet_engagement_promo', 0)));
+  const walletModalOpenedRef = useRef(false);
+  const openWalletRewardsRef = useRef(null);
+  const promotionReminderTimersRef = useRef(new Map());
+  const initialUpsellHistory = getStoredObject('fm_wallet_upsell_history', {
+    count: 0,
+    accepted: 0,
+    avgIncrement: 40,
+  });
+  const upsellHistoryRef = useRef({
+    count: Number(initialUpsellHistory.count) || 0,
+    accepted: Number(initialUpsellHistory.accepted) || 0,
+    avgIncrement: Number(initialUpsellHistory.avgIncrement) || 40,
+  });
+  const [upsellOffer, setUpsellOffer] = useState(null);
+
+  useEffect(() => {
+    const timersMap = promotionReminderTimersRef.current;
+    return () => {
+      timersMap.forEach((timers) => {
+        (timers || []).forEach((id) => clearTimeout(id));
+      });
+      timersMap.clear();
+    };
+  }, []);
+  const [selectedPromotion, setSelectedPromotion] = useState(null);
+  const [walletTimeSource, setWalletTimeSource] = useState(() => Date.now());
   const [recentlyRewardedLeadId, setRecentlyRewardedLeadId] = useState(null);
   const [walletRewardsModal, setWalletRewardsModal] = useState({ open: false, tab: 'wallet' });
   const [pendingTransaction, setPendingTransaction] = useState(null);
   const [helpConversation, setHelpConversation] = useState([]);
   const [helpIsTyping, setHelpIsTyping] = useState(false);
   const [helpAvailableTopics, setHelpAvailableTopics] = useState(() => mapHelpOptions(HELP_DEFAULT_OPTIONS));
+  const navigate = useNavigate();
   const [manualReviewQueue, setManualReviewQueue] = useState([]);
   const [activeManualReview, setActiveManualReview] = useState(null);
   const progressionTaskMap = useMemo(() => {
@@ -524,14 +571,22 @@ export default function Dashboard() {
     () => Boolean(user?.company_name && user?.company_name !== 'Fish Mouth User'),
     [user?.company_name]
   );
+  const recommendedReloadAmount = useMemo(() => {
+    if (selectedPromotion?.metadata?.recommended_amount) {
+      return Number(selectedPromotion.metadata.recommended_amount) || 250;
+    }
+    const totalReloaded = progressionMetrics?.wallet_reload_total || 0;
+    if (!totalReloaded || totalReloaded < 250) return 250;
+    if (totalReloaded < 500) return 500;
+    if (totalReloaded < 1000) return 750;
+    return 1000;
+  }, [progressionMetrics, selectedPromotion]);
   const supportDisplayName = user?.name || user?.email || 'there';
   const supportCompanyLabel = user?.company_name && user?.company_name !== 'Fish Mouth User' ? user.company_name : 'your account';
-  const hasSequences = sequences.length > 0;
   const computeLevel = useCallback((value) => {
     if (!Number.isFinite(value) || value < 0) return 1;
     let levelCandidate = 1;
     for (let idx = 0; idx < 100; idx += 1) {
-      const threshold = getLevelThreshold(idx + 1);
       const nextThreshold = getLevelThreshold(idx + 2);
       if (value < nextThreshold) {
         levelCandidate = idx + 1;
@@ -546,6 +601,13 @@ export default function Dashboard() {
       window.dispatchEvent(new CustomEvent('fm-billing-refresh'));
     }
   }, []);
+
+  useEffect(() => {
+    promotionsRef.current = walletPromotions;
+    if (typeof window !== 'undefined') {
+      window.localStorage.setItem('fm_wallet_promotions', JSON.stringify(walletPromotions));
+    }
+  }, [walletPromotions]);
 
   useEffect(() => {
     if (helpConversation.length === 0) {
@@ -566,6 +628,12 @@ export default function Dashboard() {
       setHelpAvailableTopics(mapHelpOptions(HELP_DEFAULT_OPTIONS));
     }
   }, [helpConversation.length, user?.name]);
+
+  useEffect(() => {
+    if (!walletRewardsModal.open) return undefined;
+    const interval = setInterval(() => setWalletTimeSource(Date.now()), 1000);
+    return () => clearInterval(interval);
+  }, [walletRewardsModal.open]);
 
   useEffect(() => {
     const handleManualReviewEvent = (event) => {
@@ -717,9 +785,351 @@ export default function Dashboard() {
     }, 1000);
   }, []);
 
+  const clearPromotionTimers = useCallback((promotionId) => {
+    const timers = promotionReminderTimersRef.current.get(promotionId);
+    if (timers) {
+      timers.forEach((id) => clearTimeout(id));
+      promotionReminderTimersRef.current.delete(promotionId);
+    }
+  }, []);
+
+  const schedulePromotionReminders = useCallback(
+    (promotion) => {
+      if (!promotion?.expires_at) return;
+      const expiry = Date.parse(promotion.expires_at);
+      if (Number.isNaN(expiry)) return;
+      clearPromotionTimers(promotion.id);
+      const now = Date.now();
+      const offsets = [
+        { ms: 2 * 60 * 60 * 1000, label: '2 hours' },
+        { ms: 60 * 60 * 1000, label: '1 hour' },
+        { ms: 30 * 60 * 1000, label: '30 minutes' },
+      ];
+      const timers = [];
+      offsets.forEach(({ ms, label }) => {
+        const fireIn = expiry - ms - now;
+        if (fireIn > 0) {
+          const timerId = setTimeout(() => {
+            toast(
+              (t) => (
+                <div className="flex flex-col">
+                  <strong>Wallet boost ends in {label}</strong>
+                  <span className="text-sm">Double credits expire soon. Reload now to lock it in.</span>
+                  <button
+                    type="button"
+                    className="mt-2 inline-flex items-center gap-2 rounded-full bg-emerald-500 px-3 py-1 text-xs font-semibold text-white"
+                    onClick={() => {
+                      toast.dismiss(t.id);
+                      const openWallet = openWalletRewardsRef.current;
+                      if (openWallet) {
+                        openWallet('wallet');
+                      }
+                    }}
+                  >
+                    Open wallet
+                  </button>
+                </div>
+              ),
+              { duration: 7000, icon: '⏰' }
+            );
+          }, fireIn);
+          timers.push(timerId);
+        }
+      });
+      if (timers.length) {
+        promotionReminderTimersRef.current.set(promotion.id, timers);
+      }
+    },
+    [clearPromotionTimers]
+  );
+
+  const handlePromotionSync = useCallback(
+    (incomingPromotions, { toastOnNew = true } = {}) => {
+      if (!Array.isArray(incomingPromotions)) return;
+      const existingMap = new Map((promotionsRef.current || []).map((promo) => [promo.id, promo]));
+      const updatedMap = new Map(existingMap);
+      const normalized = incomingPromotions.map((promo) => ({
+        ...promo,
+        metadata: promo?.metadata || {},
+      }));
+
+      const newlyCreated = [];
+      const extendedPromos = [];
+
+      normalized.forEach((promo) => {
+        const existing = updatedMap.get(promo.id);
+        if (!existing) {
+          updatedMap.set(promo.id, promo);
+          if (promo.status === 'active') {
+            newlyCreated.push(promo);
+          }
+          return;
+        }
+        const merged = { ...existing, ...promo };
+        if ((promo.extension_count || 0) > (existing.extension_count || 0)) {
+          extendedPromos.push(merged);
+        }
+        updatedMap.set(promo.id, merged);
+      });
+
+      const mergedList = Array.from(updatedMap.values()).sort((a, b) => {
+        const aTime = new Date(a.created_at || a.updated_at || 0).getTime();
+        const bTime = new Date(b.created_at || b.updated_at || 0).getTime();
+        return bTime - aTime;
+      });
+
+      promotionsRef.current = mergedList;
+      setWalletPromotions(mergedList);
+      const currentSelectedId = selectedPromotion?.id;
+      if (currentSelectedId) {
+        const refreshed = updatedMap.get(currentSelectedId);
+        const selectable = refreshed && ['active', 'pending_checkout'].includes(refreshed.status);
+        if (selectable) {
+          setSelectedPromotion(refreshed);
+        } else if (!refreshed || !selectable) {
+          setSelectedPromotion(null);
+        }
+      }
+      if (typeof window !== 'undefined') {
+        window.localStorage.setItem('fm_wallet_promotions', JSON.stringify(mergedList));
+      }
+
+      if (newlyCreated.length) {
+        setSelectedPromotion(newlyCreated[0]);
+      }
+
+      if (toastOnNew && newlyCreated.length) {
+        newlyCreated.forEach((promo) => {
+          const message = promo.extension_count > 0
+            ? 'Reload within the next 24 hours to double your balance.'
+            : 'Reload within 30 minutes to double your balance.';
+          const activityItem = {
+            id: `promotion-${promo.id}-${Date.now()}`,
+            type: 'promotion',
+            priority: NOTIFICATION_PRIORITY.promotion,
+            priorityLabel: PRIORITY_LABELS[NOTIFICATION_PRIORITY.promotion],
+            timestamp: new Date(),
+            timestampMs: Date.now(),
+            leadId: null,
+            title: 'Wallet boost unlocked',
+            message,
+            payload: { promotionId: promo.id, promotionCode: promo.code },
+            raw: { type: 'promotion', payload: { promotionId: promo.id, promotionCode: promo.code } },
+            visual: NOTIFICATION_VISUALS.promotion,
+            cta: 'Claim in wallet',
+          };
+          setActivity((prev) => [activityItem, ...prev].slice(0, 25));
+          toast.success(`🎁 ${promo.multiplier || 2}× wallet credits unlocked! Code ${promo.code}`, { duration: 6000 });
+        });
+        setWalletRewardsModal((prev) => ({ ...prev, open: true, tab: 'wallet' }));
+        setShowNotificationTray(true);
+      }
+
+      if (toastOnNew && extendedPromos.length) {
+        extendedPromos.forEach((promo) => {
+          toast(`Promotion extended for 24 hours. New code ${promo.code}`, {
+            icon: '⏱️',
+            duration: 6000,
+          });
+          const activityItem = {
+            id: `promotion-extension-${promo.id}-${Date.now()}`,
+            type: 'promotion',
+            priority: NOTIFICATION_PRIORITY.promotion,
+            priorityLabel: PRIORITY_LABELS[NOTIFICATION_PRIORITY.promotion],
+            timestamp: new Date(),
+            timestampMs: Date.now(),
+            leadId: null,
+            title: 'Promotion extended',
+            message: '24-hour extension applied. Reload to double your credits.',
+            payload: { promotionId: promo.id, promotionCode: promo.code, extension: true },
+            raw: { type: 'promotion', payload: { promotionId: promo.id, promotionCode: promo.code, extension: true } },
+            visual: NOTIFICATION_VISUALS.promotion,
+            cta: 'Reload wallet',
+          };
+          setActivity((prev) => [activityItem, ...prev].slice(0, 25));
+        });
+      }
+
+      const activeIds = new Set(
+        mergedList
+          .filter((promo) => promo.status === 'active' || promo.status === 'pending_checkout')
+          .map((promo) => promo.id)
+      );
+      promotionReminderTimersRef.current.forEach((_, id) => {
+        if (!activeIds.has(id)) {
+          clearPromotionTimers(id);
+        }
+      });
+      mergedList
+        .filter((promo) => promo.status === 'active')
+        .forEach((promo) => schedulePromotionReminders(promo));
+    },
+    [selectedPromotion, setActivity, setSelectedPromotion, setWalletPromotions, setWalletRewardsModal, setShowNotificationTray, schedulePromotionReminders, clearPromotionTimers]
+  );
+
+  const refreshWalletPromotions = useCallback(
+    async (options = {}) => {
+      try {
+        const data = await walletAPI.getPromotions();
+        handlePromotionSync(data, options);
+      } catch (error) {
+        console.warn('Failed to refresh wallet promotions', error);
+      }
+    },
+    [handlePromotionSync]
+  );
+
+  const applyWalletSummary = useCallback(
+    (summary) => {
+      if (!summary) return;
+      const promotions = summary.promotions || [];
+      const balanceValue = typeof summary.balance === 'number'
+        ? summary.balance
+        : (summary.balance_cents || 0) / 100;
+      const normalizedBalance = Number.isFinite(balanceValue) ? Number(balanceValue.toFixed(2)) : 0;
+      setWalletBalance(normalizedBalance);
+      handlePromotionSync(promotions, { toastOnNew: false });
+    },
+    [handlePromotionSync]
+  );
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    let cancelled = false;
+    const params = new URLSearchParams(window.location.search);
+    const status = params.get('status');
+    const sessionId = params.get('session_id');
+    const pendingRaw = window.localStorage.getItem('fm_pending_checkout');
+    let pendingData = null;
+    try {
+      pendingData = pendingRaw ? JSON.parse(pendingRaw) : null;
+    } catch (error) {
+      console.warn('pending checkout parse error', error);
+    }
+
+    const finalize = async (sessionValue, fallback = {}) => {
+      if (!sessionValue && !fallback.amount_cents) return;
+      try {
+        const payload = {};
+        if (sessionValue) payload.session_id = sessionValue;
+        if (fallback.amount_cents) payload.amount_cents = fallback.amount_cents;
+        if (fallback.credit_cents) payload.credit_cents = fallback.credit_cents;
+        if (fallback.promotion_id) payload.promotion_id = fallback.promotion_id;
+        const summary = await walletAPI.confirmCheckout(payload);
+        if (cancelled) return;
+        applyWalletSummary(summary);
+        setSelectedPromotion(null);
+        window.localStorage.removeItem('fm_pending_checkout');
+        refreshWalletPromotions({ toastOnNew: false });
+        toast.success('Wallet reload confirmed.');
+      } catch (error) {
+        console.warn('Failed to confirm checkout', error);
+        toast.error('Unable to confirm wallet reload. Contact support if funds are missing.');
+      }
+    };
+
+    if (status === 'success' && sessionId) {
+      finalize(sessionId, pendingData || {});
+    } else if (status === 'cancelled') {
+      window.localStorage.removeItem('fm_pending_checkout');
+      toast('Checkout cancelled before payment.', { icon: '⚠️' });
+    } else if (pendingData?.sessionId && !sessionId) {
+      finalize(pendingData.sessionId, pendingData);
+    }
+
+    if (status) {
+      const url = new URL(window.location.href);
+      url.searchParams.delete('status');
+      url.searchParams.delete('session_id');
+      window.history.replaceState({}, document.title, url.pathname + url.search);
+    }
+
+    return () => {
+      cancelled = true;
+    };
+  }, [applyWalletSummary, refreshWalletPromotions, setSelectedPromotion]);
+
+  useEffect(() => {
+    let cancelled = false;
+    const loadPromotions = async () => {
+      if (cancelled) return;
+      await refreshWalletPromotions({ toastOnNew: false });
+    };
+    loadPromotions();
+    const interval = setInterval(loadPromotions, 60 * 1000);
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+    };
+  }, [refreshWalletPromotions]);
+
+  const triggerPromotionForLevel = useCallback(
+    async (newLevel) => {
+      if (issuedPromotionLevelsRef.current.has(newLevel)) {
+        return;
+      }
+      try {
+        const payload = {
+          trigger: 'level_up',
+          level: newLevel,
+          context: {
+            wallet_reload_total: progressionMetrics?.wallet_reload_total || 0,
+          },
+        };
+        const promotion = await walletAPI.issuePromotion(payload);
+        if (promotion) {
+          issuedPromotionLevelsRef.current.add(newLevel);
+          if (typeof window !== 'undefined') {
+            window.localStorage.setItem('fm_promo_levels', JSON.stringify(Array.from(issuedPromotionLevelsRef.current)));
+          }
+          handlePromotionSync([promotion], { toastOnNew: true });
+        }
+      } catch (error) {
+        const status = error?.response?.status;
+        if (status && status >= 400 && status < 500) {
+          console.info('No promotion issued', error?.response?.data?.detail || error.message);
+        } else {
+          console.warn('Failed to issue wallet promotion', error);
+        }
+      }
+    },
+    [handlePromotionSync, progressionMetrics?.wallet_reload_total]
+  );
+
+  const triggerEngagementPromotion = useCallback(async () => {
+    if (walletEngagementTriggeredRef.current) return;
+    try {
+      const promotion = await walletAPI.issuePromotion({
+        trigger: 'wallet_engagement',
+        level,
+        context: { force: true, wallet_reload_total: progressionMetrics?.wallet_reload_total || 0 },
+      });
+      if (promotion) {
+        walletEngagementTriggeredRef.current = true;
+        if (typeof window !== 'undefined') {
+          window.localStorage.setItem('fm_wallet_engagement_promo', '1');
+        }
+        handlePromotionSync([promotion], { toastOnNew: true });
+        launchCelebration('🎁 2× wallet boost unlocked!', {
+          quote: 'Deposit any amount in the next few hours and we will double it instantly.',
+        });
+      }
+    } catch (error) {
+      const status = error?.response?.status;
+      if (status && status >= 400 && status < 500) {
+        console.info('No engagement promotion issued', error?.response?.data?.detail || error.message);
+      } else {
+        console.warn('Failed to issue engagement promotion', error);
+      }
+    }
+  }, [handlePromotionSync, launchCelebration, level, progressionMetrics?.wallet_reload_total]);
+
   const pushLevelUpNotification = useCallback(
     (newLevel) => {
       if (newLevel < 3) return;
+      if (issuedPromotionLevelsRef.current.has(newLevel)) {
+        return;
+      }
       const now = Date.now();
       const bonusOffer = newLevel >= 4 ? 'Double deposit boost unlocked.' : '50% reload bonus ready.';
       const note = {
@@ -743,27 +1153,99 @@ export default function Dashboard() {
         return merged.slice(0, 25);
       });
       setShowNotificationTray(true);
+      triggerPromotionForLevel(newLevel);
     },
-    [setActivity, setShowNotificationTray]
+    [setActivity, setShowNotificationTray, triggerPromotionForLevel]
   );
+
+  const handleLockPromotion = useCallback(
+    async (promotion, amount) => {
+      if (!promotion) return;
+      try {
+        const locked = await walletAPI.lockPromotion(promotion.id, amount);
+        handlePromotionSync([locked], { toastOnNew: false });
+      } catch (error) {
+        const detail = error?.response?.data?.detail || error.message;
+        toast.error(detail || 'Unable to apply promotion.');
+        throw error;
+      }
+    },
+    [handlePromotionSync]
+  );
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const summary = await walletAPI.getSummary();
+        if (!cancelled) {
+          applyWalletSummary(summary);
+        }
+      } catch (error) {
+        console.warn('Failed to load wallet summary', error);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [applyWalletSummary]);
+
+  useEffect(() => {
+    let cancelled = false;
+    const loadPromotions = async () => {
+      if (cancelled) return;
+      await refreshWalletPromotions({ toastOnNew: false });
+    };
+    loadPromotions();
+    const interval = setInterval(loadPromotions, 60 * 1000);
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+    };
+  }, [refreshWalletPromotions]);
 
   const awardPoints = useCallback(
     (amount, reason, meta = {}) => {
       if (!amount) return;
+      const todayKey = getTodayKey();
+      let ledger = pointsLedgerRef.current;
+      if (!ledger || ledger.date !== todayKey) {
+        ledger = { date: todayKey, total: 0 };
+        pointsLedgerRef.current = ledger;
+      }
+
+      const allowOverflow = Boolean(meta.allowOverflow);
+      const remainingCapacity = allowOverflow ? amount : Math.max(0, DAILY_POINTS_CAP - (ledger.total || 0));
+      if (!allowOverflow && remainingCapacity <= 0) {
+        console.info('Points cap reached for today; ignoring award.', { amount, reason });
+        return;
+      }
+
+      const grant = allowOverflow ? amount : Math.min(amount, remainingCapacity);
+      if (grant <= 0) {
+        return;
+      }
+
+      ledger.total = (ledger.total || 0) + grant;
+      if (typeof window !== 'undefined') {
+        window.localStorage.setItem('fm_points_daily', JSON.stringify({ date: ledger.date, total: ledger.total }));
+      }
+
       setPoints((prev) => {
         const previous = prev ?? 0;
-        const next = previous + amount;
+        const next = previous + grant;
         const prevLevel = computeLevel(previous);
         const nextLevel = computeLevel(next);
         if (nextLevel > prevLevel) {
           launchCelebration(`⭐ Level ${nextLevel} unlocked — premium automations activated.`);
           pushLevelUpNotification(nextLevel);
         }
-        toast.success(`+${amount} pts${reason ? ` • ${reason}` : ''}`);
+        const displayAmount = grant !== amount ? `${grant} (capped)` : grant;
+        toast.success(`+${displayAmount} pts${reason ? ` • ${reason}` : ''}`);
         return next;
       });
-      logPointEvent(amount, reason, meta);
-      spawnPointBurst(amount, reason);
+      logPointEvent(grant, reason, meta);
+      spawnPointBurst(grant, reason);
       if (meta?.leadId) {
         registerLeadReward(meta.leadId);
       }
@@ -875,13 +1357,60 @@ export default function Dashboard() {
     const progress = (points - levelBasePoints) / span;
     return Math.max(0, Math.min(1, progress));
   }, [points, levelBasePoints, nextLevelPoints]);
-  const openWalletRewards = useCallback((tab = 'wallet') => {
-    setWalletRewardsModal({ open: true, tab });
-  }, []);
+  const openWalletRewards = useCallback(
+    async (tab = 'wallet') => {
+      setWalletRewardsModal({ open: true, tab });
+      walletModalOpenedRef.current = true;
+      const unseen = (promotionsRef.current || []).filter((promo) => promo.status === 'active' && !promo.viewed_at);
+      if (!unseen.length) return;
+      await Promise.all(
+        unseen.map(async (promo) => {
+          try {
+            const data = await walletAPI.acknowledgePromotion(promo.id);
+            handlePromotionSync([data], { toastOnNew: false });
+          } catch (error) {
+            console.warn('wallet promotion acknowledge failed', error);
+          }
+        })
+      );
+    },
+    [handlePromotionSync]
+  );
+
+  useEffect(() => {
+    openWalletRewardsRef.current = openWalletRewards;
+  }, [openWalletRewards]);
 
   const closeWalletRewards = useCallback(() => {
     setWalletRewardsModal((prev) => ({ ...prev, open: false }));
-  }, []);
+    setSelectedPromotion(null);
+    if (walletModalOpenedRef.current) {
+      walletModalOpenedRef.current = false;
+      walletOpenCounterRef.current += 1;
+      if (typeof window !== 'undefined') {
+        window.localStorage.setItem('fm_wallet_open_count', String(walletOpenCounterRef.current));
+      }
+      if (walletOpenCounterRef.current >= 3 && !walletEngagementTriggeredRef.current) {
+        triggerEngagementPromotion();
+      }
+    }
+  }, [setSelectedPromotion, triggerEngagementPromotion]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const params = new URLSearchParams(window.location.search);
+    const promoCode = params.get('walletPromo');
+    if (promoCode) {
+      const match = (promotionsRef.current || []).find((promo) => promo.code === promoCode);
+      if (match) {
+        setSelectedPromotion(match);
+      }
+      openWalletRewards('wallet');
+      const url = new URL(window.location.href);
+      url.searchParams.delete('walletPromo');
+      window.history.replaceState({}, document.title, url.toString());
+    }
+  }, [openWalletRewards, setSelectedPromotion]);
 
   const handleRedeemLeadCredit = useCallback(() => {
     if (points < POINTS_PER_LEAD) {
@@ -1508,19 +2037,53 @@ const notifications = useMemo(() => {
     []
   );
 
+  const refreshScannerData = useCallback(async () => {
+    setScannerTableLoading(true);
+    const extractArray = (payload, explicitKeys = []) => {
+      if (!payload) return [];
+      if (Array.isArray(payload)) return payload;
+      const keys = [...explicitKeys, 'items', 'data', 'results', 'records', 'list', 'scans', 'clusters'];
+      for (const key of keys) {
+        const candidate = payload?.[key];
+        if (Array.isArray(candidate)) {
+          return candidate;
+        }
+      }
+      return [];
+    };
+
+    try {
+      const [scanPayload, clusterPayload] = await Promise.all([
+        leadAPI.getScans(),
+        leadAPI.getHeatClusters(),
+      ]);
+      const scans = extractArray(scanPayload, ['scans']);
+      const clusterList = extractArray(clusterPayload, ['clusters']);
+      setScanSummaries(scans);
+      setClusterSummaries(clusterList);
+      setClusters(clusterList);
+      return { scans, clusters: clusterList };
+    } catch (error) {
+      console.error('Failed to load scanner data', error);
+      return null;
+    } finally {
+      setScannerTableLoading(false);
+    }
+  }, []);
+
   const refreshData = async () => {
     setLoading(true);
     try {
-      await Promise.all([refreshStats(), refreshLeadList(), refreshActivity()]);
+      await Promise.all([refreshStats(), refreshLeadList(), refreshActivity(), refreshScannerData()]);
     } catch (error) {
       console.error('Failed to refresh data:', error);
-      // Load mock data on error
-      loadMockData();
+      await loadMockData();
+    } finally {
+      setLoading(false);
     }
-    setLoading(false);
   };
 
-  const loadMockData = () => {
+  const loadMockData = async () => {
     setStats({
       total_leads: 1247,
       ultra_hot_leads: 89,
@@ -1699,45 +2262,24 @@ const notifications = useMemo(() => {
       }))
     );
     setLeadLoading(false);
-
-    setClusters([
-      {
-        id: 'west-austin-tx',
-        city: 'Austin',
-        state: 'TX',
-        permit_count: 18,
-        cluster_score: 88.5,
-        cluster_status: 'hot',
-        radius_miles: 0.5,
-        date_range_start: new Date(now.getTime() - 9 * 24 * 60 * 60 * 1000).toISOString(),
-        date_range_end: new Date(now.getTime() - 1 * 24 * 60 * 60 * 1000).toISOString(),
-        metadata: { hot_leads: 12, ultra_hot_leads: 5 },
+    const fallbackClusters = mockHeatClusters.map((cluster) => ({
+      id: cluster.id,
+      city: cluster.city,
+      state: cluster.state,
+      permit_count: cluster.permit_count,
+      cluster_score: cluster.cluster_score,
+      cluster_status: cluster.cluster_status || cluster.status,
+      radius_miles: cluster.radius_miles,
+      date_range_start: cluster.last_activity_at,
+      date_range_end: cluster.last_activity_at,
+      metadata: {
+        hot_leads: cluster.lead_overlap,
+        likely_new_roofs: cluster.likely_new_roofs,
       },
-      {
-        id: 'east-austin-tx',
-        city: 'Austin',
-        state: 'TX',
-        permit_count: 12,
-        cluster_score: 81.4,
-        cluster_status: 'active',
-        radius_miles: 0.5,
-        date_range_start: new Date(now.getTime() - 14 * 24 * 60 * 60 * 1000).toISOString(),
-        date_range_end: new Date(now.getTime() - 4 * 24 * 60 * 60 * 1000).toISOString(),
-        metadata: { hot_leads: 9, ultra_hot_leads: 2 },
-      },
-      {
-        id: 'south-austin-tx',
-        city: 'Austin',
-        state: 'TX',
-        permit_count: 9,
-        cluster_score: 76.9,
-        cluster_status: 'warming',
-        radius_miles: 0.5,
-        date_range_start: new Date(now.getTime() - 21 * 24 * 60 * 60 * 1000).toISOString(),
-        date_range_end: new Date(now.getTime() - 6 * 24 * 60 * 60 * 1000).toISOString(),
-        metadata: { hot_leads: 6, ultra_hot_leads: 1 },
-      },
-    ]);
+    }));
+    setClusters(fallbackClusters);
+    setClusterSummaries(mockHeatClusters);
+    setScanSummaries(mockRecentScans);
 
     setActivity([
       {
@@ -1789,6 +2331,11 @@ const notifications = useMemo(() => {
       },
     ]);
   };
+
+  const scannerRows = useMemo(
+    () => buildScannerRows(scanSummaries, clusterSummaries),
+    [scanSummaries, clusterSummaries]
+  );
 
   const loadAppConfig = async () => {
     try {
@@ -1983,8 +2530,51 @@ const notifications = useMemo(() => {
         ...metrics,
         scans_started: (metrics.scans_started || 0) + 1,
       }));
+
+      if (scan?.id) {
+        setScanSummaries((prev) => {
+          const next = Array.isArray(prev) ? prev.filter((item) => item.id !== scan.id) : [];
+          const enriched = {
+            ...scan,
+            id: scan.id,
+            area_name: scan.area_name || scan.name || scan.title,
+            status: scan.status || 'queued',
+            created_at: scan.created_at || new Date().toISOString(),
+          };
+          return [enriched, ...next];
+        });
+      }
+
+      refreshScannerData();
     },
-    [updateProgressionMetrics]
+    [refreshScannerData, updateProgressionMetrics]
+  );
+
+  const handleClustersTracked = useCallback(
+    (detectedClusters) => {
+      if (!Array.isArray(detectedClusters) || detectedClusters.length === 0) {
+        refreshScannerData();
+        return;
+      }
+      const dedupe = (list) => {
+        const map = new Map();
+        list.forEach((item) => {
+          if (!item) return;
+          const key = item.id || item.cluster_id || `${item.city || 'cluster'}-${item.state || 'state'}-${item.cluster_score || ''}`;
+          if (!map.has(key)) {
+            map.set(key, { ...item, id: item.id || key });
+          } else {
+            map.set(key, { ...map.get(key), ...item, id: item.id || key });
+          }
+        });
+        return Array.from(map.values());
+      };
+
+      setClusterSummaries((prev) => dedupe([...(Array.isArray(detectedClusters) ? detectedClusters : []), ...(Array.isArray(prev) ? prev : [])]));
+      setClusters((prev) => dedupe([...(Array.isArray(detectedClusters) ? detectedClusters : []), ...(Array.isArray(prev) ? prev : [])]));
+      refreshScannerData();
+    },
+    [refreshScannerData]
   );
 
   const handleCallLeadDirect = (lead) => {
@@ -2085,18 +2675,107 @@ const notifications = useMemo(() => {
     [points, logPointEvent, broadcastBillingRefresh, usageRules]
   );
 
-  const handleStripeTopUp = useCallback(
-    async (amount) => {
+  const buildUpsellIncrements = useCallback((amount) => {
+    const increments = [];
+    const pushIfValid = (value) => {
+      if (value > 0 && value <= amount) {
+        increments.push(value);
+      }
+    };
+    if (amount <= 50) {
+      [10, 20, 30, 40, 50].forEach(pushIfValid);
+    } else if (amount <= 150) {
+      [25, 50, 75, 100].forEach(pushIfValid);
+    } else if (amount <= 500) {
+      [50, 75, 100, 125, 150].forEach(pushIfValid);
+    } else if (amount <= 1000) {
+      [75, 100, 150, 200, 250].forEach(pushIfValid);
+    } else {
+      [100, 150, 200, 250, 300, 400].forEach(pushIfValid);
+    }
+    return Array.from(new Set(increments)).sort((a, b) => a - b);
+  }, []);
+
+  const computeUpsellSuggestion = useCallback(
+    (amount) => {
+      if (!Number.isFinite(amount) || amount <= 0) return null;
+      const increments = buildUpsellIncrements(amount);
+      if (!increments.length) return null;
+      const history = upsellHistoryRef.current;
+      const baseline = Number(history.avgIncrement) || increments[0];
+      const weights = increments.map((value, index) => {
+        const distance = Math.abs(value - baseline);
+        const biasTowardsLower = 1 / (1 + index);
+        const biasTowardsHistory = 1 / (1 + distance / 25);
+        return biasTowardsLower + biasTowardsHistory;
+      });
+      const totalWeight = weights.reduce((sum, weight) => sum + weight, 0);
+      let roll = Math.random() * totalWeight;
+      let chosen = increments[0];
+      weights.some((weight, index) => {
+        roll -= weight;
+        if (roll <= 0) {
+          chosen = increments[index];
+          return true;
+        }
+        return false;
+      });
+      return {
+        increment: chosen,
+        total: amount + chosen,
+        increments,
+      };
+    },
+    [buildUpsellIncrements]
+  );
+
+  const persistUpsellHistory = useCallback(() => {
+    if (typeof window === 'undefined') return;
+    window.localStorage.setItem('fm_wallet_upsell_history', JSON.stringify(upsellHistoryRef.current));
+  }, []);
+
+  const performStripeTopUp = useCallback(
+    async (amount, options = {}) => {
       const numeric = Number(amount);
       if (!Number.isFinite(numeric) || numeric <= 0) {
         toast.error('Choose a valid top-up amount first.');
         return;
       }
+      const promoContext = options?.promotion || selectedPromotion;
+      const skipUpsell = options.skipUpsell || options.type === 'plan';
+      if (!skipUpsell) {
+        const suggestion = computeUpsellSuggestion(numeric);
+        if (suggestion) {
+          setUpsellOffer({
+            baseAmount: numeric,
+            increment: suggestion.increment,
+            totalAmount: suggestion.total,
+            promotion: promoContext,
+            originalOptions: { ...options },
+          });
+          return;
+        }
+      }
+      const multiplier = promoContext ? promoContext.multiplier || 2 : 1;
+      const creditedValue = Number.isFinite(multiplier) ? numeric * multiplier : numeric;
+      const amountCents = Math.round(numeric * 100);
+      const creditCents = Math.round(creditedValue * 100);
       try {
+        const payload = { amount: numeric };
+        if (options?.type) {
+          payload.type = options.type;
+        }
+        if (options?.planId) {
+          payload.planId = options.planId;
+        }
+        if (promoContext) {
+          payload.promotion_id = promoContext.id;
+          payload.promotion_code = promoContext.code;
+        }
         const response = await fetch('/api/billing/stripe/session', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ amount: numeric }),
+          body: JSON.stringify(payload),
         });
         if (response.ok) {
           const data = await response.json();
@@ -2104,6 +2783,34 @@ const notifications = useMemo(() => {
             ...metrics,
             wallet_reload_total: (metrics.wallet_reload_total || 0) + numeric,
           }));
+          if (data?.promotion) {
+            handlePromotionSync([data.promotion], { toastOnNew: false });
+          }
+          const pendingPayload = {
+            sessionId: data?.sessionId || data?.session_id || null,
+            amount_cents: amountCents,
+            credit_cents: creditCents,
+            promotion_id: promoContext?.id || null,
+          };
+          if (!data?.mock) {
+            window.localStorage.setItem('fm_pending_checkout', JSON.stringify(pendingPayload));
+          }
+          if (data?.mock) {
+            const summary = await walletAPI.confirmCheckout({
+              amount_cents: amountCents,
+              credit_cents: creditCents,
+              promotion_id: promoContext?.id,
+            });
+            applyWalletSummary(summary);
+            window.localStorage.removeItem('fm_pending_checkout');
+            setSelectedPromotion(null);
+            toast.success(
+              promoContext
+                ? `Wallet reload successful — doubled to $${creditedValue.toLocaleString()} credits.`
+                : `Wallet reload successful — $${numeric.toLocaleString()} added.`
+            );
+            return;
+          }
           if (data?.checkoutUrl) {
             window.open(data.checkoutUrl, '_blank', 'noopener');
             toast.success('Stripe checkout opened in a new tab.');
@@ -2114,14 +2821,57 @@ const notifications = useMemo(() => {
             toast.success('Stripe checkout ready in a new tab.');
             return;
           }
+          toast.error('Stripe checkout unavailable. Add your Stripe API keys and retry.');
+          return;
+        } else {
+          const errorPayload = await response.json().catch(() => ({}));
+          if (response.status === 409 && promoContext) {
+            toast.error(errorPayload?.detail || 'That promotion is no longer available.');
+            await refreshWalletPromotions({ toastOnNew: false });
+            return;
+          }
+          toast.error(errorPayload?.detail || 'Stripe checkout unavailable. Add your Stripe API keys and retry.');
+          return;
         }
-        toast.error('Stripe checkout unavailable. Add your Stripe API keys and retry.');
       } catch (error) {
         console.warn('Stripe checkout fallback', error);
         toast.error('Unable to reach Stripe. Verify configuration and retry.');
       }
     },
-    []
+    [applyWalletSummary, handlePromotionSync, refreshWalletPromotions, selectedPromotion, setSelectedPromotion, updateProgressionMetrics, computeUpsellSuggestion, setUpsellOffer]
+  );
+
+  const handleUpsellDecision = useCallback(
+    (accepted) => {
+      if (!upsellOffer) return;
+      const { baseAmount, increment, promotion, originalOptions } = upsellOffer;
+      setUpsellOffer(null);
+      const history = upsellHistoryRef.current;
+      history.count = (history.count || 0) + 1;
+      if (accepted) {
+        history.accepted = (history.accepted || 0) + 1;
+        const acceptedCount = history.accepted;
+        const prevAvg = history.avgIncrement || increment;
+        history.avgIncrement = (prevAvg * (acceptedCount - 1) + increment) / acceptedCount;
+        persistUpsellHistory();
+        toast.success(`Upsell applied: +$${increment.toLocaleString()} for extra credits.`);
+        performStripeTopUp(baseAmount + increment, {
+          ...originalOptions,
+          promotion,
+          skipUpsell: true,
+        });
+        return;
+      }
+      const prevAvg = history.avgIncrement || increment;
+      history.avgIncrement = prevAvg * 0.8 + increment * 0.2;
+      persistUpsellHistory();
+      performStripeTopUp(baseAmount, {
+        ...originalOptions,
+        promotion,
+        skipUpsell: true,
+      });
+    },
+    [performStripeTopUp, persistUpsellHistory, upsellOffer]
   );
 
   const handlePlanCheckout = useCallback(
@@ -2170,7 +2920,7 @@ const notifications = useMemo(() => {
         toast.error('Unable to start Stripe checkout. Verify configuration and retry.');
       }
     },
-    []
+    [progressionTaskMap, markQuestComplete]
   );
 
   const handleResolveManualReview = useCallback(
@@ -2348,6 +3098,10 @@ const notifications = useMemo(() => {
           openWalletRewards('rewards');
           goTo('dashboard');
           return;
+        case 'promotion':
+          openWalletRewards('wallet');
+          goTo('dashboard');
+          return;
         default:
           if (targetLeadId) {
             inspectLeadById(targetLeadId);
@@ -2356,7 +3110,7 @@ const notifications = useMemo(() => {
           goTo('activity');
       }
     },
-    [inspectLeadById, setActiveManualReview, setActiveView, setReportLeadId, setShowNotificationTray, setLastNotificationViewedAt]
+    [inspectLeadById, openWalletRewards, setActiveManualReview, setActiveView, setReportLeadId, setShowNotificationTray, setLastNotificationViewedAt]
   );
 
   const exportLeadsCsv = (rows) => {
@@ -2435,9 +3189,6 @@ const notifications = useMemo(() => {
           roi_percent: stats?.roi ?? stats?.estimated_roi ?? null,
         };
         const roi = roiData?.roi_percent ?? 0;
-        const upcomingTasks = (taskReminders || []).slice(0, 4);
-        const errorItems = (dashboardErrors || []).slice(0, 4);
-        const usageEntries = Object.entries(usageSummary || {}).slice(0, 3);
         const daysToBonus = streak > 0 ? (streak % 7 === 0 ? 0 : 7 - (streak % 7)) : 7;
         const todayKey = getTodayKey();
         const streakQuestId = `daily.streak.${todayKey}`;
@@ -2544,8 +3295,6 @@ const notifications = useMemo(() => {
         const heroEntries = sortedHeroLeads.slice(0, MAX_HERO_LEADS);
 
         const respondDisabled = !primaryUrgentLead;
-        const callDisabled = !leadForCall;
-        const emailDisabled = !leadForEmail;
         return (
           <div className="space-y-8">
             <div className="space-y-4">
@@ -2606,18 +3355,21 @@ const notifications = useMemo(() => {
                   <div className="flex flex-col gap-3 sm:flex-row">
                     <button
                       type="button"
-                      onClick={() => {
-                        if (leadForCall) {
-                          handleCallLeadDirect(leadForCall);
-                        } else {
-                          setActiveView('leads');
-                        }
-                      }}
-                      disabled={callDisabled}
-                      className="inline-flex items-center justify-center gap-2 rounded-lg bg-red-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-red-500 disabled:cursor-not-allowed disabled:bg-red-400"
+                      onClick={() => setActiveView('leads')}
+                      className="inline-flex items-center justify-center gap-2 rounded-lg bg-indigo-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-indigo-500"
                     >
-                      <Phone className="w-4 h-4" />
-                      Call hottest lead
+                      <Users className="w-4 h-4" />
+                      View new leads
+                      <span className={`ml-2 inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-semibold ${isDark ? 'bg-slate-800/70 text-blue-200' : 'bg-blue-100 text-blue-700'}`}>
+                        {(() => {
+                          const count = (leadList || []).filter((lead) => {
+                            const createdAt = resolveLeadCreatedAt(lead);
+                            const hours = getLeadAgeHours(createdAt);
+                            return hours != null && hours < 24;
+                          }).length;
+                          return count;
+                        })()}
+                      </span>
                     </button>
                     <button
                       type="button"
@@ -2629,18 +3381,11 @@ const notifications = useMemo(() => {
                     </button>
                     <button
                       type="button"
-                      onClick={() => {
-                        if (leadForEmail) {
-                          handleEmailLeadDirect(leadForEmail);
-                        } else {
-                          setActiveView('leads');
-                        }
-                      }}
-                      disabled={emailDisabled}
-                      className="inline-flex items-center justify-center gap-2 rounded-lg bg-green-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-green-500 disabled:cursor-not-allowed disabled:bg-green-400"
+                      onClick={() => setActiveView('analytics')}
+                      className="inline-flex items-center justify-center gap-2 rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-emerald-500"
                     >
-                      <Mail className="w-4 h-4" />
-                      Send follow-up
+                      <Sparkles className="w-4 h-4" />
+                      See results
                     </button>
                   </div>
                 </div>
@@ -2705,65 +3450,20 @@ const notifications = useMemo(() => {
               />
             )}
 
-            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-              <div className={`${surfaceClass(isDark)} p-6 space-y-2`}>
-                <div className={`text-sm font-semibold uppercase tracking-wide ${headingClass}`}>ROI Snapshot</div>
-                <div className={`text-3xl font-bold ${headingClass}`}>
-                  {roiData?.roi_percent != null ? `${roiData.roi_percent.toFixed(1)}%` : '—'}
-                </div>
-                <div className={`text-xs ${mutedClass}`}>30-day spend {currencyFormatter.format(roiData?.spend_last_30 || 0)}</div>
-                <div className={`text-xs ${mutedClass}`}>Pipeline value {currencyFormatter.format(roiData?.pipeline_value || 0)}</div>
-                <div className={`text-xs ${mutedClass}`}>Closed last 30 days {currencyFormatter.format(roiData?.closed_value || 0)}</div>
-              </div>
-
-              <div className={`${surfaceClass(isDark)} p-6 space-y-3`}>
-                <div className={`text-sm font-semibold uppercase tracking-wide ${headingClass}`}>Task Queue</div>
-                {upcomingTasks.length === 0 ? (
-                  <p className={`text-sm ${mutedClass}`}>No tasks queued—great job keeping things current.</p>
-                ) : (
-                  <ul className="space-y-2">
-                    {upcomingTasks.map((task) => (
-                      <li key={task.id} className={`${isDark ? 'bg-slate-900/60' : 'bg-gray-50'} rounded-xl px-3 py-2`}> 
-                        <div className={`text-xs font-semibold ${headingClass}`}>{(task.task_type || 'Task').replace(/_/g, ' ')}</div>
-                        <div className={`text-xs ${mutedClass}`}>
-                          Due {task.scheduled_for ? formatRelativeTime(new Date(task.scheduled_for).getTime()) : 'soon'}
-                        </div>
-                      </li>
-                    ))}
-                  </ul>
-                )}
-              </div>
-
-              <div className={`${surfaceClass(isDark)} p-6 space-y-3`}>
-                <div className={`text-sm font-semibold uppercase tracking-wide ${headingClass}`}>System Health</div>
-                {errorItems.length === 0 ? (
-                  <p className={`text-sm ${mutedClass}`}>No delivery issues detected in the last 24 hours.</p>
-                ) : (
-                  <ul className="space-y-2">
-                    {errorItems.map((error) => (
-                      <li key={error.type} className="text-xs">
-                        <span className="font-semibold text-red-500 mr-2">{error.type.replace(/[_\.]/g, ' ')}</span>
-                        <span className={mutedClass}>×{error.count} • {error.last_seen ? formatRelativeTime(new Date(error.last_seen).getTime()) : 'recent'}</span>
-                      </li>
-                    ))}
-                  </ul>
-                )}
-                {usageEntries.length > 0 && (
-                  <div className="pt-2 border-t border-dashed border-slate-200 dark:border-slate-700">
-                    <div className={`text-xs font-semibold mb-1 ${headingClass}`}>Usage (7d)</div>
-                    <dl className="space-y-1 text-xs">
-                      {usageEntries.map(([metric, value]) => (
-                        <div key={metric} className="flex justify-between">
-                          <dt className={mutedClass}>{metric.replace(/_/g, ' ')}</dt>
-                          <dd className={headingClass}>
-                            {(value.quantity ?? 0).toLocaleString()} • {currencyFormatter.format(value.cost ?? 0)}
-                          </dd>
-                        </div>
-                      ))}
-                    </dl>
-                  </div>
-                )}
-              </div>
+            <div className={`${surfaceClass(isDark)} p-6`}>
+              <LeadQueueTabs
+                tabs={appConfig.leadQueueTabs}
+                leadQueue={leadQueue}
+                columns={appConfig.leadTableColumns}
+                isDark={isDark}
+                onOpenLead={(lead) => {
+                  setSelectedMapLeadId(lead.id);
+                  handleInspectLead(lead);
+                }}
+                onCallLead={handleCallLeadDirect}
+                onAssignSequence={handleAssignSequence}
+                onGenerateReport={(leadId, _template, lead) => handleGenerateReport(leadId, undefined, lead)}
+              />
             </div>
 
             {/* Gamified progress */}
@@ -3092,67 +3792,21 @@ const notifications = useMemo(() => {
               <p className={`text-sm ${mutedClass}`}>Scan new territories and monitor neighbourhood contagion in a single command center.</p>
             </header>
             <div className={`${surfaceClass(isDark)} p-6`}>
-              <AreaScanner isDark={isDark} onScanStarted={handleScanTracked} />
+              <AreaScanner
+                isDark={isDark}
+                onScanStarted={handleScanTracked}
+                onClustersDetected={handleClustersTracked}
+              />
             </div>
-            <div className={`${surfaceClass(isDark)} p-6 space-y-4`}>
-              <div className="flex items-center justify-between gap-3 flex-wrap">
-                <div>
-                  <h2 className={`text-xl font-semibold ${headingClass}`}>Active heat clusters</h2>
-                  <p className={`text-sm ${mutedClass}`}>Prioritise follow-up where neighbours are booking work right now.</p>
-                </div>
-                <span
-                  className={`inline-flex items-center gap-2 px-3 py-1 rounded-full text-xs font-semibold ${
-                    isDark ? 'bg-indigo-500/20 text-indigo-200' : 'bg-indigo-50 text-indigo-600'
-                  }`}
-                >
-                  <MapPin className="w-3.5 h-3.5" />
-                  {clusters.length} active
-                </span>
-              </div>
-              {clusters.length === 0 ? (
-                <div className={`${surfaceClass(isDark)} p-6 text-sm ${mutedClass}`}>
-                  No contagion clusters detected yet. Run scans to populate activity.
-                </div>
-              ) : (
-                <div className="grid gap-4">
-                  {clusters.map((cluster) => (
-                    <div
-                      key={cluster.id}
-                      className={`rounded-2xl border ${
-                        isDark ? 'border-slate-700 bg-slate-900/60' : 'border-gray-200 bg-gray-50'
-                      } p-4 space-y-3`}
-                    >
-                      <div className="flex justify-between items-start gap-3">
-                        <div>
-                          <h3 className={`font-semibold ${headingClass}`}>
-                            {cluster.city}, {cluster.state}
-                          </h3>
-                          <p className={`text-xs ${mutedClass}`}>
-                            Radius {cluster.radius_miles?.toFixed(1) || 0.5} mi • Hot leads {cluster.metadata?.hot_leads ?? '—'}
-                          </p>
-                        </div>
-                        <span
-                          className={`px-2 py-1 rounded-full text-xs font-semibold ${
-                            cluster.cluster_status === 'hot'
-                              ? 'bg-rose-500/15 text-rose-500'
-                              : cluster.cluster_status === 'active'
-                              ? 'bg-amber-500/15 text-amber-500'
-                              : 'bg-blue-500/15 text-blue-500'
-                          }`}
-                        >
-                          {cluster.cluster_status}
-                        </span>
-                      </div>
-                      <div className={`flex flex-wrap gap-4 text-xs ${mutedClass}`}>
-                        <span>Permits: {cluster.permit_count}</span>
-                        <span>Cluster score: {cluster.cluster_score}</span>
-                        <span>Activity: {formatDateRange(cluster.date_range_start, cluster.date_range_end)}</span>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
+            <ScannerActivityTable
+              className={`${surfaceClass(isDark)} p-6`}
+              isDark={isDark}
+              rows={scannerRows}
+              scanCount={scanSummaries.length}
+              clusterCount={clusterSummaries.length}
+              loading={scannerTableLoading}
+              onRowNavigate={(row) => navigate(row.link)}
+            />
           </div>
         );
       
@@ -3508,342 +4162,6 @@ const notifications = useMemo(() => {
           </div>
         );
       
-      case 'leads':
-        return (
-          <div className="space-y-6">
-            <header className="flex justify-between items-center">
-              <div>
-                <h1 className={`text-3xl font-bold ${headingClass}`}>All Leads</h1>
-                <p className={`${mutedClass}`}>Manage and track all your leads in one place</p>
-              </div>
-              <div className="flex gap-3">
-                <QuickActionButton
-                  dark={isDark}
-                  icon={<Download className="w-4 h-4" />}
-                  label="Export CSV"
-                  onClick={() => exportLeadsCsv(leadList)}
-                />
-                <QuickActionButton
-                  dark={isDark}
-                  icon={<Phone className="w-4 h-4" />}
-                  label="AI Campaign"
-                  onClick={() =>
-                    handleStartAICampaign(
-                      leadList
-                        .slice(0, 15)
-                        .map((lead) => lead.id)
-                    )
-                  }
-                />
-              </div>
-            </header>
-            {leadLoading ? (
-              <div className={`${surfaceClass(isDark)} p-6`}>
-                <div className="flex items-center justify-center">
-                  <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-blue-600"></div>
-                  <span className={`ml-3 ${mutedClass}`}>Loading leads...</span>
-                </div>
-              </div>
-            ) : (
-              <div className={`${surfaceClass(isDark)} p-6`}>
-                <LeadIntelligenceTable
-                  isDark={isDark}
-                  leads={leadList}
-                  onSelectLead={setSelectedLead}
-                  selectedLead={selectedLead}
-                  onGenerateReport={handleGenerateReport}
-                />
-              </div>
-            )}
-          </div>
-        );
-        const recentReports = (stats?.recent_reports && stats.recent_reports.length
-          ? stats.recent_reports.map((report) => ({
-              id: report.id || report.report_id,
-              template: report.template || 'lead_dossier',
-              generated_at: report.generated_at || report.created_at,
-              status: report.status || 'ready',
-              lead:
-                report.lead ||
-                leadsForReports.find((lead) => Number(lead.id) === Number(report.lead_id)) ||
-                selectedReportLead,
-            }))
-          : leadsForReports.slice(0, 5).map((lead, idx) => ({
-              id: `report-${lead.id || idx}`,
-              template: 'lead_dossier',
-              generated_at: lead.last_contacted || lead.created_at || new Date().toISOString(),
-              status: 'ready',
-              lead,
-            })));
-        const titleize = (value) =>
-          typeof value === 'string'
-            ? value
-                .split('_')
-                .join(' ')
-                .replace(/\b\w/g, (char) => char.toUpperCase())
-            : value;
-        const reportCoaching = (() => {
-          const tips = [];
-          if (selectedReportLead) {
-            if (selectedReportLead.replacement_urgency || selectedReportLead.priority) {
-              tips.push(
-                `Lead urgency: ${titleize(selectedReportLead.replacement_urgency || selectedReportLead.priority)} — open with the Storm Impact Playbook to lock a crew slot before competitors do.`
-              );
-            }
-            if (Array.isArray(selectedReportLead.damage_indicators) && selectedReportLead.damage_indicators.length) {
-              const indicators = selectedReportLead.damage_indicators.slice(0, 3).map(titleize).join(', ');
-              tips.push(
-                `Damage indicators flagged: ${indicators}. Pair the Insurance Evidence Pack with annotated photos to keep the adjuster on your side.`
-              );
-            }
-            if (selectedReportLead.roof_age_years && Number(selectedReportLead.roof_age_years) >= 15) {
-              tips.push(
-                `Roof age is ${selectedReportLead.roof_age_years}+ years. Layer in the Maintenance & Upsell Plan to secure a seasonal service agreement.`
-              );
-            }
-            if (selectedReportLead.last_contact) {
-              const daysSinceTouch = Math.round(
-                Math.max(0, (Date.now() - new Date(selectedReportLead.last_contact).getTime()) / (1000 * 60 * 60 * 24))
-              );
-              if (daysSinceTouch >= 3) {
-                tips.push(
-                  `It’s been ${daysSinceTouch} days since the last touch. Send the Roof Intelligence Brief recap with a same-day text follow-up.`
-                );
-              }
-            }
-          }
-          if (tips.length < 3) {
-            tips.push(
-              'Always attach your logo and crew contact info inside Brand Settings so every PDF feels bespoke to the homeowner.'
-            );
-            tips.push(
-              'Drop the PDF into your CRM sequence—notifications include a share link you can paste into SMS or email.'
-            );
-          }
-          return tips;
-        })();
-        return (
-          <div className="space-y-6">
-            <div className={`${surfaceClass(isDark)} p-6 space-y-6`}>
-              <div className="flex flex-wrap items-start justify-between gap-4">
-                <div>
-                  <h1 className={`text-3xl font-bold ${headingClass}`}>Reports & Dossiers</h1>
-                  <p className={`text-sm ${mutedClass}`}>
-                    Package AI intelligence into homeowner-ready dossiers, storm briefs, and insurance packs.
-                  </p>
-                </div>
-                <div className="flex items-center gap-3">
-                  <select
-                    value={reportLeadId || ''}
-                    onChange={(event) => setReportLeadId(event.target.value)}
-                    className={`rounded-lg border px-3 py-2 text-sm ${
-                      isDark
-                        ? 'bg-slate-900 border-slate-700 text-slate-100'
-                        : 'bg-white border-gray-300 text-gray-900'
-                    }`}
-                  >
-                    {leadsForReports.map((lead) => (
-                      <option key={`report-lead-${lead.id}`} value={lead.id}>
-                        {lead.homeowner_name || lead.address}
-                      </option>
-                    ))}
-                  </select>
-                  <button
-                    type="button"
-                    onClick={() => setActiveView('settings')}
-                    className={`inline-flex items-center gap-2 px-3 py-2 text-xs font-semibold rounded-lg ${
-                      isDark ? 'bg-slate-800 text-slate-200 hover:bg-slate-700' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
-                    }`}
-                  >
-                    <Settings className="w-3.5 h-3.5" /> Brand settings
-                  </button>
-                </div>
-              </div>
-
-              <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-                {(reportTemplates || []).map((template) => (
-                  <div
-                    key={template.id}
-                    className={`rounded-2xl border p-4 space-y-3 ${
-                      isDark ? 'border-slate-800 bg-slate-900/70 text-slate-100' : 'border-gray-200 bg-white text-gray-900'
-                    }`}
-                  >
-                    <div className="flex items-start justify-between gap-3">
-                      <div>
-                        <h3 className="text-lg font-semibold">{template.name}</h3>
-                        <p className={`text-xs mt-1 ${isDark ? 'text-slate-400' : 'text-gray-500'}`}>{template.description}</p>
-                      </div>
-                      <span className={`px-2 py-1 rounded-full text-[10px] font-semibold ${isDark ? 'bg-slate-800 text-slate-300' : 'bg-gray-100 text-gray-600'}`}>
-                        {template.estimatedTime}
-                      </span>
-                    </div>
-                    <ul className={`text-xs space-y-1 ${isDark ? 'text-slate-400' : 'text-gray-500'}`}>
-                      {template.sections.map((section) => (
-                        <li key={`${template.id}-${section}`}>• {section}</li>
-                      ))}
-                    </ul>
-                    {template.homeownerPainPoints?.length ? (
-                      <div
-                        className={`rounded-xl px-3 py-2 text-xs space-y-1 ${
-                          isDark ? 'bg-rose-500/10 text-rose-200 border border-rose-500/20' : 'bg-rose-50 text-rose-600 border border-rose-200'
-                        }`}
-                      >
-                        <p className="font-semibold uppercase tracking-wide text-[10px]">Homeowner hot buttons</p>
-                        <ul className="space-y-1">
-                          {template.homeownerPainPoints.map((point) => (
-                            <li key={`${template.id}-pain-${point}`} className="leading-snug">
-                              {point}
-                            </li>
-                          ))}
-                        </ul>
-                      </div>
-                    ) : null}
-                    {template.rooferAngles?.length ? (
-                      <div
-                        className={`rounded-xl px-3 py-2 text-xs space-y-1 ${
-                          isDark ? 'bg-emerald-500/10 text-emerald-200 border border-emerald-500/20' : 'bg-emerald-50 text-emerald-600 border border-emerald-200'
-                        }`}
-                      >
-                        <p className="font-semibold uppercase tracking-wide text-[10px]">Crew advantage</p>
-                        <ul className="space-y-1">
-                          {template.rooferAngles.map((angle) => (
-                            <li key={`${template.id}-angle-${angle}`} className="leading-snug">
-                              {angle}
-                            </li>
-                          ))}
-                        </ul>
-                      </div>
-                    ) : null}
-                    {template.recommendedCTA && (
-                      <p className={`text-[11px] leading-snug ${isDark ? 'text-slate-300' : 'text-gray-600'}`}>
-                        <span className="font-semibold text-blue-500 uppercase tracking-wide text-[10px] mr-2">CTA</span>
-                        {template.recommendedCTA}
-                      </p>
-                    )}
-                    <div className="flex items-center gap-2 pt-1">
-                      <QuickActionButton
-                        icon={<Eye className="w-4 h-4" />}
-                        label="Preview"
-                        dark={isDark}
-                        onClick={() => {
-                          if (!selectedReportLead) {
-                            toast.error('Select a lead to preview');
-                            return;
-                          }
-                          setReportPreview({ template, lead: selectedReportLead });
-                        }}
-                      />
-                      <QuickActionButton
-                        icon={<FileText className="w-4 h-4" />}
-                        label="Generate"
-                        dark={isDark}
-                        onClick={() => {
-                          if (!selectedReportLead) {
-                            toast.error('Select a lead to generate a report');
-                            return;
-                          }
-                          handleGenerateReport(selectedReportLead.id, template.id, selectedReportLead);
-                        }}
-                      />
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-
-            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-              <div className={`${surfaceClass(isDark)} p-6 lg:col-span-2 space-y-4`}>
-                <div className="flex items-center justify-between gap-3">
-                  <h3 className={`text-lg font-semibold ${headingClass}`}>Recent reports</h3>
-                  <span className={`text-xs ${mutedClass}`}>{recentReports.length} generated in the last 24h</span>
-                </div>
-                <div className="overflow-x-auto">
-                  <table className="min-w-full text-sm">
-                    <thead className={isDark ? 'bg-slate-900/60 text-slate-300 border-b border-slate-800' : 'bg-slate-50 text-gray-600 border-b border-gray-200'}>
-                      <tr>
-                        <th className="px-4 py-2 text-left text-[11px] uppercase tracking-wide">Lead</th>
-                        <th className="px-4 py-2 text-left text-[11px] uppercase tracking-wide">Template</th>
-                        <th className="px-4 py-2 text-left text-[11px] uppercase tracking-wide">Generated</th>
-                        <th className="px-4 py-2 text-left text-[11px] uppercase tracking-wide">Status</th>
-                        <th className="px-4 py-2 text-right text-[11px] uppercase tracking-wide">Actions</th>
-                      </tr>
-                    </thead>
-                    <tbody className={isDark ? 'divide-y divide-slate-800 text-slate-100' : 'divide-y divide-gray-200 text-gray-900'}>
-                      {recentReports.map((report) => (
-                        <tr key={report.id} className={isDark ? 'hover:bg-slate-900/40' : 'hover:bg-blue-50/60'}>
-                          <td className="px-4 py-2">
-                            <div>
-                              <p className="font-semibold">{report.lead?.homeowner_name || report.lead?.address || 'Lead'}</p>
-                              <p className={`text-[11px] ${mutedClass}`}>{report.lead?.address}</p>
-                            </div>
-                          </td>
-                          <td className="px-4 py-2 text-xs capitalize">{report.template?.replace('_', ' ')}</td>
-                          <td className="px-4 py-2 text-xs">{new Date(report.generated_at).toLocaleString()}</td>
-                          <td className="px-4 py-2 text-xs">
-                            <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full ${
-                              report.status === 'ready'
-                                ? 'bg-emerald-500/15 text-emerald-500'
-                                : 'bg-amber-500/15 text-amber-500'
-                            }`}>
-                              <Sparkles className="w-3 h-3" /> {report.status.replace('_', ' ')}
-                            </span>
-                          </td>
-                          <td className="px-4 py-2 text-right text-xs">
-                            <div className="inline-flex items-center gap-2">
-                              <button
-                                type="button"
-                                className={`px-3 py-1 rounded-full font-semibold ${isDark ? 'bg-slate-800 text-slate-200 hover:bg-slate-700' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}
-                                onClick={() => setReportPreview({ template: report.template, lead: report.lead })}
-                              >
-                                Preview
-                              </button>
-                              <button
-                                type="button"
-                                className="px-3 py-1 rounded-full font-semibold bg-blue-600 text-white hover:bg-blue-500"
-                                onClick={() =>
-                                  report.lead && handleGenerateReport(report.lead.id, report.template, report.lead)
-                                }
-                              >
-                                Regenerate
-                              </button>
-                              <button
-                                type="button"
-                                className={`px-3 py-1 rounded-full font-semibold ${isDark ? 'bg-slate-800 text-slate-200 hover:bg-slate-700' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}
-                                onClick={() => {
-                                  if (report.id) {
-                                    // open full page view in a new tab for printing
-                                    window.open(`/reports/view/${report.id}`, '_blank');
-                                  }
-                                }}
-                              >
-                                Open
-                              </button>
-                            </div>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              </div>
-              <div className={`${surfaceClass(isDark)} p-6 space-y-3`}>
-                <h3 className={`text-lg font-semibold ${headingClass}`}>Template tips</h3>
-                <ul className={`text-sm space-y-2 ${mutedClass}`}>
-                  {reportCoaching.map((tip) => (
-                    <li key={`coaching-${tip}`}>• {tip}</li>
-                  ))}
-                </ul>
-                <button
-                  type="button"
-                  onClick={() => setActiveView('settings')}
-                  className="inline-flex items-center gap-2 text-sm font-semibold text-blue-600 hover:text-blue-500"
-                >
-                  <ArrowUpRight className="w-4 h-4" /> Configure templates
-                </button>
-              </div>
-            </div>
-          </div>
-        );
       
       case 'calls':
         return <VoiceCallManager isDark={isDark} />;
@@ -4316,7 +4634,7 @@ const notifications = useMemo(() => {
                 </button>
                 {showProfileMenu && (
                   <div
-                    className={`absolute right-0 mt-3 w-64 rounded-2xl border shadow-xl overflow-hidden z-50 ${
+                    className={`absolute right-0 mt-3 w-64 rounded-2xl border shadow-xl overflow-hidden z-[80] ${
                       isDark ? 'bg-slate-950 border-slate-800 text-slate-100' : 'bg-white border-slate-200 text-slate-800'
                     }`}
                   >
@@ -4422,7 +4740,7 @@ const notifications = useMemo(() => {
                   )}
                 </button>
                 <div
-                  className={`absolute right-0 mt-4 w-[22rem] transform transition-all duration-200 origin-top-right ${
+                  className={`absolute right-0 z-[80] mt-4 w-[22rem] transform transition-all duration-200 origin-top-right ${
                     showNotificationTray
                       ? 'scale-100 opacity-100 translate-y-0 pointer-events-auto'
                       : 'scale-95 opacity-0 -translate-y-2 pointer-events-none'
@@ -4620,7 +4938,7 @@ const notifications = useMemo(() => {
       pricing={CREDIT_PRICING}
       nextLevelPoints={nextLevelPoints}
       levelProgress={levelProgress * 100}
-      onStripeTopUp={handleStripeTopUp}
+      onStripeTopUp={performStripeTopUp}
       onPlanCheckout={handlePlanCheckout}
       onRedeemLead={handleRedeemLeadCredit}
       onCompleteTask={handleQuestAction}
@@ -4630,8 +4948,60 @@ const notifications = useMemo(() => {
       onExchangePoints={handleExchangePoints}
       onOpenLedger={() => setShowPointsModal(true)}
       isDarkMode={isDark}
+      promotions={walletPromotions}
+      selectedPromotion={selectedPromotion}
+      onSelectPromotion={setSelectedPromotion}
+      onLockPromotion={handleLockPromotion}
+      currentTimestamp={walletTimeSource}
+      recommendedAmount={recommendedReloadAmount}
     />
   )}
+
+  {upsellOffer && (() => {
+    const multiplier = upsellOffer.promotion?.multiplier || 1;
+    const bonusCredits = upsellOffer.increment * multiplier;
+    const newTotal = upsellOffer.totalAmount || upsellOffer.baseAmount + upsellOffer.increment;
+    return (
+      <div
+        className="fixed inset-0 z-[120] flex items-center justify-center bg-slate-950/70 backdrop-blur-sm"
+        onClick={() => handleUpsellDecision(false)}
+      >
+        <div
+          className="max-w-md w-full mx-4 rounded-3xl border border-emerald-400/40 bg-slate-900 text-slate-100 shadow-[0_30px_80px_rgba(16,185,129,0.45)] p-6"
+          onClick={(event) => event.stopPropagation()}
+        >
+          <div className="flex items-center gap-3 mb-4">
+            <span className="flex h-11 w-11 items-center justify-center rounded-2xl bg-emerald-500/20 text-emerald-200">
+              <Gift className="w-5 h-5" />
+            </span>
+            <div>
+              <h3 className="text-lg font-semibold">Add ${upsellOffer.increment.toLocaleString()} to double credits</h3>
+              <p className="text-xs text-emerald-200/80">Reload jumps to ${newTotal.toLocaleString()} · +${bonusCredits.toLocaleString()} credits land instantly.</p>
+            </div>
+          </div>
+          <p className="text-sm text-slate-200/90 leading-relaxed">
+            Most teams that boost by this amount book another inspection this week. Want to lock in the extra ${bonusCredits.toLocaleString()} credits right now?
+          </p>
+          <div className="mt-6 flex flex-col sm:flex-row sm:items-center sm:justify-end gap-3">
+            <button
+              type="button"
+              onClick={() => handleUpsellDecision(false)}
+              className="flex-1 sm:flex-none rounded-xl border border-slate-700 px-4 py-2 text-sm font-semibold text-slate-200 hover:bg-slate-800"
+            >
+              Maybe later
+            </button>
+            <button
+              type="button"
+              onClick={() => handleUpsellDecision(true)}
+              className="flex-1 sm:flex-none inline-flex items-center justify-center gap-2 rounded-xl bg-emerald-500 px-4 py-2 text-sm font-semibold text-slate-900 hover:bg-emerald-400"
+            >
+              Add ${upsellOffer.increment.toLocaleString()} &amp; continue
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  })()}
 
   {activeManualReview && (
     <ManualReviewModal
@@ -4945,21 +5315,6 @@ function renderActivityLabel(item) {
   if (item.type === 'manual_review') return `Review ${item.payload?.stepLabel || 'sequence draft'}`;
   if (item.type === 'ai_call_completed') return `AI call completed with ${item.payload?.lead_name || 'lead'}`;
   return `Activity: ${item.type}`;
-}
-
-function formatDateRange(start, end) {
-  if (!start && !end) return '—';
-  const format = (value) => {
-    try {
-      return new Date(value).toLocaleDateString();
-    } catch {
-      return value;
-    }
-  };
-  if (start && end) {
-    return `${format(start)} → ${format(end)}`;
-  }
-  return format(start || end);
 }
 
 function formatRelativeTime(timestampMs) {

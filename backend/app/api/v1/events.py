@@ -57,3 +57,10 @@ async def ingest(ev: ClientEvent, request: Request) -> Dict[str, str]:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     finally:
         await db.close()
+
+
+@router.post("/client", status_code=201)
+async def ingest_client(ev: ClientEvent, request: Request) -> Dict[str, str]:
+    """Alias endpoint for backwards compatibility with the Boost pack."""
+
+    return await ingest(ev, request)

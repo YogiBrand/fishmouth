@@ -97,6 +97,7 @@ class User(Base):
     gift_leads_awarded = Column(Integer, default=0)
     gift_awarded_at = Column(DateTime, nullable=True)
     onboarding_state = Column(JSON, nullable=True, default=dict)
+    wallet_balance_cents = Column(Integer, nullable=False, default=0)
 
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
@@ -107,6 +108,7 @@ class User(Base):
     sequences = relationship("Sequence", back_populates="user")
     voice_calls = relationship("VoiceCall", back_populates="user")
     voice_config = relationship("VoiceConfiguration", back_populates="user", uselist=False)
+    wallet_promotions = relationship("WalletPromotion", back_populates="user")
     ai_config = relationship("AIConfiguration", back_populates="user", uselist=False)
     scan_jobs = relationship("ScanJob", back_populates="user")
 
@@ -161,6 +163,35 @@ class ScanJob(Base):
     finished_at = Column(DateTime, nullable=True)
 
     user = relationship("User", back_populates="scan_jobs")
+
+
+class WalletPromotion(Base):
+    __tablename__ = "wallet_promotions"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    code = Column(String(32), unique=True, nullable=False, index=True)
+    multiplier = Column(Float, nullable=False, default=1.0)
+    reward_type = Column(String(64), nullable=False, default="double_wallet_credit")
+    trigger_source = Column(String(64), nullable=False, default="level_up")
+    status = Column(String(32), nullable=False, default="active")
+    # Use a non-reserved attribute name while keeping DB column name 'metadata'
+    promo_metadata = Column("metadata", JSON, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    expires_at = Column(DateTime, nullable=True)
+    redeemed_at = Column(DateTime, nullable=True)
+    locked_at = Column(DateTime, nullable=True)
+    viewed_at = Column(DateTime, nullable=True)
+    extension_count = Column(Integer, default=0)
+    triggered_level = Column(Integer, nullable=True)
+    extension_sent_at = Column(DateTime, nullable=True)
+    last_notification_at = Column(DateTime, nullable=True)
+    lock_amount = Column(Float, nullable=True)
+    status_reason = Column(String(200), nullable=True)
+
+    user = relationship("User", back_populates="wallet_promotions")
+
 
 class Lead(Base):
     __tablename__ = "leads"
@@ -1395,3 +1426,24 @@ class Template(Base):
     version = Column(Integer, nullable=False, default=1)
     is_system = Column(Boolean, nullable=False, default=False)
     updated_at = Column(DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class MarketingSignup(Base):
+    __tablename__ = "marketing_signups"
+    __table_args__ = (Index("idx_marketing_signups_created_at", "created_at"),)
+
+    id = Column(PGUUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    name = Column(String(120), nullable=False)
+    email = Column(String(255), nullable=False)
+    phone = Column(String(32), nullable=True)
+    company = Column(String(140), nullable=False)
+    city = Column(String(120), nullable=True)
+    state = Column(String(120), nullable=True)
+    country = Column(String(120), nullable=True)
+    source = Column(String(120), nullable=True)
+    medium = Column(String(120), nullable=True)
+    campaign = Column(String(120), nullable=True)
+    notes = Column(Text, nullable=True)
+    ip = Column(String(64), nullable=True)
+    user_agent = Column(Text, nullable=True)
+    created_at = Column(DateTime(timezone=True), nullable=False, default=datetime.utcnow)

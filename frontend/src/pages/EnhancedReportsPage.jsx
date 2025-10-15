@@ -1,9 +1,9 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { 
-  FileText, ArrowLeft, Settings, Users, Home, 
-  AlertCircle, CheckCircle, Clock, Download,
-  Share2, Plus, Edit, Eye
+  FileText, ArrowLeft, Settings, Home, 
+  AlertCircle, CheckCircle, Clock,
+  Plus, Eye
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import EnhancedReportGenerator from '../components/EnhancedReportGenerator';
@@ -20,11 +20,7 @@ const EnhancedReportsPage = () => {
   const [loading, setLoading] = useState(true);
   const [missingProfileData, setMissingProfileData] = useState([]);
 
-  useEffect(() => {
-    loadData();
-  }, [leadId]);
-
-  const loadData = async () => {
+  const loadData = useCallback(async () => {
     try {
       setLoading(true);
       
@@ -66,7 +62,11 @@ const EnhancedReportsPage = () => {
     } finally {
       setLoading(false);
     }
-  };
+  }, [leadId]);
+
+  useEffect(() => {
+    loadData();
+  }, [loadData]);
 
   const checkMissingProfileData = (profile) => {
     const missing = [];

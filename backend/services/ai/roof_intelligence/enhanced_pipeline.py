@@ -451,6 +451,56 @@ class StreetViewCollector:
         dossier_id: str,
         max_angles: int = 3,
     ) -> List[StreetViewAsset]:
+        # 1) Try community street imagery service first (free-first)
+        community_assets: List[StreetViewAsset] = []
+        base_url = (
+            settings.providers.street_imagery_base_url or "http://street-imagery:8014"
+        )
+        try:
+            async with self._rate_limiter:
+                async with httpx.AsyncClient(timeout=settings.http_timeout_seconds) as client:
+                    resp = await client.post(
+                        f"{base_url}/images/community/nearest",
+                        json={
+                            "lat": latitude,
+                            "lon": longitude,
+                            "radius_m": 75,
+                            "max_results": 12,
+                            "max_angles": max_angles,
+                            "prefer_openrouter_ranking": True,
+                        },
+                    )
+            if resp.status_code == 200:
+                data = resp.json()
+                for item in (data.get("assets") or []):
+                    image_url = item.get("image_url")
+                    if not image_url:
+                        continue
+                    community_assets.append(
+                        StreetViewAsset(
+                            heading=float(item.get("heading") or 0.0),
+                            pitch=-5.0,
+                            fov=80.0,
+                            source=item.get("provider") or "community",
+                            captured_at=datetime.now(timezone.utc),
+                            distance_m=float(item.get("distance_m") or 0.0),
+                            occlusion_score=float(item.get("occlusion_score") or 0.3),
+                            quality_score=float(item.get("quality_score") or 0.6),
+                            anomalies=[],
+                            public_url=image_url,
+                            storage_path=f"{dossier_id}/streetview/community-{int(float(item.get('heading') or 0))}.jpg",
+                            raw_bytes=b"",
+                        )
+                    )
+        except Exception:
+            community_assets = []
+
+        if community_assets:
+            # Return best community assets; no paid calls
+            community_assets.sort(key=lambda a: (a.quality_score, -a.occlusion_score), reverse=True)
+            return community_assets[: max_angles]
+
+        # 2) Fallback to Google Street View Static if configured and not in mock imagery mode
         if not settings.providers.google_maps_api_key or settings.feature_flags.use_mock_imagery:
             return []
 

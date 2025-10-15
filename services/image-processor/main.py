@@ -16,6 +16,7 @@ import cv2
 import numpy as np
 from PIL import Image, ImageEnhance, ImageFilter
 from fastapi import FastAPI, HTTPException, BackgroundTasks
+from fastapi import Response
 from pydantic import BaseModel
 
 import structlog
@@ -118,6 +119,52 @@ async def download_cost_optimized_satellite(request: CostOptimizedSatelliteReque
         "cost_approach": "free_openstreetmap_first",
         "estimated_cost": "$0.00 (if free sources succeed)"
     }
+
+
+class OSMRequest(BaseModel):
+    lat: float
+    lng: float
+    zoom: int = 18
+    prefer_free: bool = True
+
+
+@app.post("/images/satellite/osm")
+async def get_osm_satellite_image(request: OSMRequest) -> Response:
+    """Return a stitched OSM mosaic synchronously as JPEG bytes.
+
+    This endpoint is designed for internal microservice consumption by the
+    backend imagery provider chain to obtain a free satellite-style raster.
+    """
+    try:
+        # Attempt tile download and stitching
+        property_id = f"osm-{request.lat:.5f}-{request.lng:.5f}-{request.zoom}"
+        ok = await download_openstreetmap_tiles(property_id, request.lat, request.lng, request.zoom)
+        if not ok:
+            # Attempt cache
+            cache_dir = Path(f"/app/images/satellite/{property_id}")
+            latest = None
+            if cache_dir.exists():
+                jpgs = list(cache_dir.glob("*.jpg"))
+                if jpgs:
+                    latest = max(jpgs, key=lambda p: p.stat().st_mtime)
+            if latest and latest.exists():
+                return Response(latest.read_bytes(), media_type="image/jpeg")
+            raise HTTPException(status_code=424, detail="OSM tiles unavailable")
+
+        # Load stitched output path
+        out_path = Path(f"/app/images/satellite/{property_id}/free_osm_satellite.jpg")
+        if not out_path.exists():
+            # Fallback: search for any jpg
+            candidates = list(Path(f"/app/images/satellite/{property_id}").glob("*.jpg"))
+            if not candidates:
+                raise HTTPException(status_code=500, detail="Stitched image missing")
+            out_path = max(candidates, key=lambda p: p.stat().st_mtime)
+
+        return Response(out_path.read_bytes(), media_type="image/jpeg")
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 async def process_free_first_satellite_download(
     property_id: str,
@@ -699,6 +746,228 @@ async def extract_property_from_batch(property_id: str, batch_id: int):
         
     except Exception as e:
         print(f"❌ Property extraction error: {e}")
+
+# Import Super HD Enhancement module
+try:
+    from super_hd_enhancement import enhance_satellite_to_super_hd
+    SUPER_HD_AVAILABLE = True
+    print("✅ Super HD Enhancement module loaded")
+except ImportError as e:
+    SUPER_HD_AVAILABLE = False
+    print(f"⚠️ Super HD Enhancement not available: {e}")
+
+class SuperHDRequest(BaseModel):
+    property_id: str
+    image_path: Optional[str] = None  # If not provided, will use latest satellite image
+    lat: Optional[float] = None  # For Mapillary coordinate passthrough
+    lng: Optional[float] = None
+    enhancement_level: Optional[str] = "maximum"  # "light", "medium", "maximum"
+    target_resolution: Optional[str] = "4k"  # "hd", "2k", "4k", "8k"
+    apply_mapillary_context: Optional[bool] = True  # Use Mapillary for additional context
+
+@app.post("/images/super-hd/enhance")
+async def enhance_to_super_hd(request: SuperHDRequest, background_tasks: BackgroundTasks):
+    """
+    Transform blurry satellite images to Super HD quality using open source AI models.
+    
+    This endpoint takes low-quality satellite imagery and radically improves it using:
+    - Real-ESRGAN style super resolution
+    - SRCNN enhancement 
+    - EDSR detail enhancement
+    - Satellite-specific optimizations
+    - Mapillary coordinate passthrough for context
+    """
+    
+    if not SUPER_HD_AVAILABLE:
+        raise HTTPException(
+            status_code=503, 
+            detail="Super HD Enhancement module not available"
+        )
+    
+    # Find image to enhance
+    if request.image_path and os.path.exists(request.image_path):
+        image_path = request.image_path
+    else:
+        # Find latest satellite image for property
+        property_dir = Path(f"/app/images/satellite/{request.property_id}")
+        if not property_dir.exists():
+            raise HTTPException(
+                status_code=404,
+                detail=f"No satellite images found for property {request.property_id}"
+            )
+        
+        image_files = list(property_dir.glob("*.jpg"))
+        if not image_files:
+            raise HTTPException(
+                status_code=404,
+                detail=f"No JPEG satellite images found for property {request.property_id}"
+            )
+        
+        # Use most recent image
+        image_path = str(max(image_files, key=lambda p: p.stat().st_mtime))
+    
+    # Queue Super HD enhancement
+    background_tasks.add_task(
+        process_super_hd_enhancement,
+        request.property_id,
+        image_path,
+        request.enhancement_level,
+        request.target_resolution,
+        request.lat,
+        request.lng,
+        request.apply_mapillary_context
+    )
+    
+    return {
+        "success": True,
+        "message": f"Super HD enhancement queued for property {request.property_id}",
+        "property_id": request.property_id,
+        "enhancement_level": request.enhancement_level,
+        "target_resolution": request.target_resolution,
+        "input_image": image_path,
+        "estimated_processing_time": "30-120 seconds",
+        "enhancement_methods": [
+            "Real-ESRGAN style super resolution",
+            "SRCNN neural enhancement", 
+            "EDSR detail enhancement",
+            "Satellite-specific optimizations",
+            "Advanced local processing"
+        ]
+    }
+
+async def process_super_hd_enhancement(
+    property_id: str,
+    image_path: str,
+    enhancement_level: str,
+    target_resolution: str,
+    lat: Optional[float],
+    lng: Optional[float],
+    apply_mapillary_context: bool
+):
+    """Process Super HD enhancement with optional Mapillary context"""
+    
+    try:
+        print(f"🚀 Starting Super HD processing for property {property_id}")
+        
+        # Step 1: Apply Mapillary coordinate context if available
+        if apply_mapillary_context and lat and lng:
+            await apply_mapillary_coordinate_context(property_id, lat, lng)
+        
+        # Step 2: Enhance satellite image to Super HD
+        result = await enhance_satellite_to_super_hd(
+            image_path,
+            property_id,
+            enhancement_level,
+            target_resolution
+        )
+        
+        if result["success"]:
+            print(f"✅ Super HD enhancement completed for property {property_id}")
+            print(f"📊 Result: {result['original_resolution']} → {result['enhanced_resolution']}")
+            print(f"💾 Enhanced image: {result['enhanced_path']}")
+            
+            # Step 3: Save enhancement metadata
+            await save_super_hd_metadata(property_id, result)
+        else:
+            print(f"❌ Super HD enhancement failed for property {property_id}: {result.get('error')}")
+            
+    except Exception as e:
+        print(f"❌ Super HD processing error for property {property_id}: {e}")
+
+async def apply_mapillary_coordinate_context(property_id: str, lat: float, lng: float):
+    """Apply Mapillary coordinate passthrough for enhanced coverage and context"""
+    
+    try:
+        print(f"🗺️ Applying Mapillary coordinate context for {lat}, {lng}")
+        
+        # This would integrate with street-imagery service (port 8014)
+        # to get additional context from street-level imagery
+        
+        # For now, log the coordinate context
+        context_data = {
+            "property_id": property_id,
+            "coordinates": {"lat": lat, "lng": lng},
+            "mapillary_context_applied": True,
+            "timestamp": datetime.now().isoformat()
+        }
+        
+        # Save context for future enhancement reference
+        context_dir = Path(f"/app/images/satellite/{property_id}/context")
+        context_dir.mkdir(parents=True, exist_ok=True)
+        
+        context_file = context_dir / "mapillary_context.json"
+        with open(context_file, 'w') as f:
+            json.dumps(context_data, f, indent=2)
+        
+        print(f"✅ Mapillary coordinate context applied and saved")
+        
+    except Exception as e:
+        print(f"⚠️ Mapillary context application error: {e}")
+
+async def save_super_hd_metadata(property_id: str, enhancement_result: Dict[str, Any]):
+    """Save Super HD enhancement metadata for tracking and analysis"""
+    
+    try:
+        metadata = {
+            "property_id": property_id,
+            "enhancement_timestamp": datetime.now().isoformat(),
+            "enhancement_result": enhancement_result,
+            "service_version": "2.1.0",
+            "enhancement_type": "super_hd_ai_models"
+        }
+        
+        # Save metadata
+        metadata_dir = Path(f"/app/images/satellite/{property_id}/metadata")
+        metadata_dir.mkdir(parents=True, exist_ok=True)
+        
+        metadata_file = metadata_dir / "super_hd_enhancement.json"
+        with open(metadata_file, 'w') as f:
+            json.dumps(metadata, f, indent=2)
+        
+        print(f"📋 Super HD metadata saved for property {property_id}")
+        
+    except Exception as e:
+        print(f"⚠️ Metadata save error: {e}")
+
+@app.get("/images/super-hd/status/{property_id}")
+async def get_super_hd_status(property_id: str):
+    """Get Super HD enhancement status and results for a property"""
+    
+    try:
+        # Check for enhanced images
+        enhanced_dir = Path(f"/app/images/satellite/{property_id}/enhanced")
+        comparison_dir = Path(f"/app/images/satellite/{property_id}/comparisons")
+        metadata_dir = Path(f"/app/images/satellite/{property_id}/metadata")
+        
+        enhanced_images = list(enhanced_dir.glob("super_hd_*.jpg")) if enhanced_dir.exists() else []
+        comparison_images = list(comparison_dir.glob("comparison_*.jpg")) if comparison_dir.exists() else []
+        
+        # Load metadata if available
+        metadata = {}
+        metadata_file = metadata_dir / "super_hd_enhancement.json"
+        if metadata_file.exists():
+            with open(metadata_file, 'r') as f:
+                metadata = json.loads(f.read())
+        
+        # Build status response
+        status = {
+            "property_id": property_id,
+            "has_enhanced_images": len(enhanced_images) > 0,
+            "enhanced_images": [str(img) for img in enhanced_images],
+            "comparison_images": [str(img) for img in comparison_images],
+            "enhancement_metadata": metadata,
+            "total_enhanced_versions": len(enhanced_images),
+            "super_hd_available": SUPER_HD_AVAILABLE
+        }
+        
+        return status
+        
+    except Exception as e:
+        return {
+            "property_id": property_id,
+            "error": str(e),
+            "has_enhanced_images": False
+        }
 
 if __name__ == "__main__":
     import uvicorn

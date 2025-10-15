@@ -1,0 +1,40 @@
+{
+  "US": {
+    "default": [
+      {
+        "title": "Old shingles",
+        "desc": "Asphalt roofs often age out at 18\u201322 years. Granule loss and brittle tabs increase leak risk."
+      },
+      {
+        "title": "Flashing & vents",
+        "desc": "Improper flashing around chimneys and vents is a top source of leaks."
+      }
+    ],
+    "regions": {
+      "Southeast": [
+        {
+          "title": "Algae streaking",
+          "desc": "Humidity and shade lead to dark streaks; inhibits curb appeal and can signal wear."
+        }
+      ],
+      "Midwest": [
+        {
+          "title": "Ice dams",
+          "desc": "Freeze\u2013thaw cycles push water under shingles at eaves; proper underlayment is key."
+        }
+      ],
+      "Texas": [
+        {
+          "title": "Wind & hail",
+          "desc": "Storm seasons cause shingle bruising and lifted tabs; timely checks prevent rot."
+        }
+      ],
+      "Coast": [
+        {
+          "title": "Salt & wind",
+          "desc": "Salt air and crosswinds accelerate shingle edge wear and flashing issues."
+        }
+      ]
+    }
+  }
+}

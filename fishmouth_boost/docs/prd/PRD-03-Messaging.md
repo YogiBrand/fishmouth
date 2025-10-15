@@ -1,77 +1,18 @@
-# PRD‑03 · Messaging (Email & SMS)
+# PRD‑03 · Outbound Messaging (Email & SMS) + Webhooks + Shortlinks
 
-**Goal:** SendGrid + Telnyx adapters, delivery webhooks, shortlinks (`/l/:code`).
+**Goal**: Reliable SendGrid email and Telnyx SMS with receipts, shortlink tracking, and safe fallbacks.
 
-## Data
-- `outbox_messages`, `message_events`
+**API**
+- `POST /api/v1/outbox/send` — queue send; returns message id
+- `GET /api/v1/outbox/{id}` — status
+- `POST /webhooks/sendgrid` / `POST /webhooks/telnyx` — delivery, open, click, bounce
+- `GET /l/{code}` — shortlink redirect (emits `message.clicked`)
 
-## Acceptance
-- Delivery/open/click/bounce tracked; shortlink click emits events.
+**Data**
+- `outbox_messages(id, channel, payload, status, provider, provider_id, error, created_at, sent_at)`
+- `message_events(id, message_id fk, type, meta, at)`
 
-## API Endpoints
-
-- `POST /api/v1/outbox/send`
-  - Queues an email or SMS message for delivery.
-  - Request body (email example):
-
-    ```json
-    {
-      "channel": "email",
-      "to": "prospect@example.com",
-      "subject": "Your roof report is ready",
-      "html": "Hi {{shortlink}}",
-      "text": "Hi {{shortlink}}",
-      "attachments": [
-        {
-          "source": "report_pdf",
-          "filename": "report.pdf",
-          "type": "application/pdf"
-        }
-      ],
-      "context": {
-        "report_id": "REPORT-123",
-        "lead_id": "LEAD-455",
-        "share_url": "/r/abc123"
-      }
-    }
-    ```
-
-- Handler persists to `outbox_messages`, emits a `queued` event, and either executes inline (`use_inline_sequence_runner`) or dispatches `tasks.message_tasks.deliver`.
-
-## Webhooks
-
-- `POST /api/v1/webhooks/sendgrid`
-  - Verifies [SendGrid Event Webhook](https://docs.sendgrid.com/for-developers/tracking-events/event#security)
-    signatures via `SENDGRID_EVENT_PUBLIC_KEY`.
-  - Maps `processed|delivered|open|click|bounce|dropped|spamreport` →
-    `message_events` rows and updates `outbox_messages.status`.
-
-- `POST /api/v1/webhooks/telnyx`
-  - Validates Telnyx Ed25519/HMAC headers (`TELNYX_WEBHOOK_PUBLIC_KEY` or
-    `TELNYX_WEBHOOK_SECRET`).
-  - Handles `message.sent|message.delivered|message.delivery_failed|message.failed|message.bounced`.
-
-### Sample cURL
-
-```bash
-curl -X POST http://localhost:8000/api/v1/webhooks/sendgrid \
-  -H "Content-Type: application/json" \
-  -H "X-Twilio-Email-Event-Webhook-Signature: <sig>" \
-  -H "X-Twilio-Email-Event-Webhook-Timestamp: <ts>" \
-  -d '[{"event":"delivered","sg_message_id":"abc","email":"prospect@example.com","timestamp":1730000000,"custom_args":{"outbox_id":"<UUID>"}}]'
-```
-
-```bash
-curl -X POST http://localhost:8000/api/v1/webhooks/telnyx \
-  -H "Content-Type: application/json" \
-  -H "Telnyx-Timestamp: <ts>" \
-  -H "Telnyx-Signature-Ed25519: <sig>" \
-  -d '{"data":{"event_type":"message.delivered","payload":{"id":"msg_123","to":"+15551234567","metadata":{"message_id":"<UUID>"}}}}'
-```
-
-## Shortlinks
-
-- `GET /l/{code}` resolves tracked links to the latest share URL,
-  records `message.clicked`, and returns a `302` redirect.
-- Messages can use the `{{shortlink}}` token; the outbox service swaps it
-  for a tracked URL and stores metadata in `outbox_messages.payload.shortlinks`.
+**Acceptance**
+- Transient errors retry (x3, backoff).
+- Webhooks validated by signature, idempotent insert.
+- Clicks linked via shortlinks to report shares.

@@ -66,9 +66,42 @@ async def test_template_preview_reports_missing_tokens():
         await db.close()
 
     assert result["resolved"].startswith("Hi Jamie")
+    assert result["html"] == result["resolved"]
     assert "[[lead.last_name]]" in result["resolved"]
     assert "lead.last_name" in result["unresolved_tokens"]
     assert result["unresolved_tokens"].count("lead.last_name") == 1
+
+
+@pytest.mark.asyncio
+async def test_template_preview_with_context_override():
+    session = SessionLocal()
+    try:
+        template = Template(
+            id="sms.greeting",
+            scope="sms",
+            content="Hi {{lead.first_name}} from {{company.name}}",
+            version=1,
+        )
+        session.add(template)
+        session.commit()
+    finally:
+        session.close()
+
+    db = DatabaseSession()
+    try:
+        result = await template_service.preview_template(
+            db,
+            template_id="sms.greeting",
+            context_override={
+                "lead": {"first_name": "Sky"},
+                "company": {"name": "Boost Roofing"},
+            },
+        )
+    finally:
+        await db.close()
+
+    assert result["html"] == "Hi Sky from Boost Roofing"
+    assert result["unresolved_tokens"] == []
 
 
 @pytest.mark.asyncio

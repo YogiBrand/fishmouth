@@ -61,7 +61,7 @@ export default function GoogleAuthButton({ onSuccess, onError, exposeController,
         } catch (_) {}
       }
     });
-  }, [loginWithGoogle, clientId, width, size]);
+  }, [loginWithGoogle, clientId, width, size, onSuccess, onError]);
 
   const open = useCallback(() => {
     try {

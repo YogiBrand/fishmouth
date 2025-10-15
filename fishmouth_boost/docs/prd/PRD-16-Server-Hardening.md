@@ -1,4 +1,6 @@
-# PRD‑16 · Server Hardening & Compose Fixes
+# PRD‑16 · Server Hardening
 
-Fix REACT_APP_SCRAPER_URL=8011; add /healthz & /readyz; JSON logs + request_id; OTEL exporters;
-split Celery queues with acks_late and time limits; Grafana dashboards; Sentry releases; CI gates.
+- Health endpoints `/healthz`, `/readyz` for every service.
+- JSON logs with `request_id`; OpenTelemetry exporters.
+- Docker compose override fixes & resource limits.
+- CI gates for migrations and tests; Sentry release tagging.

@@ -1,35 +1,30 @@
 from __future__ import annotations
 
-import json
-import logging
 import secrets
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Dict, Optional
 
 import sqlalchemy as sa
 from fastapi import APIRouter, HTTPException, Request
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.responses import HTMLResponse
 from pydantic import BaseModel
 
-from app.core.config import get_settings
 from app.core.database import get_db
 from app.lib import EventPayload, emit_event
-from services.outbox_service import register_click_event
 
 router = APIRouter(prefix="/api/v1/shares", tags=["shares"])
 public_router = APIRouter(include_in_schema=False)
 
 
 STATIC_ROOT = Path(__file__).resolve().parents[2] / "static"
-logger = logging.getLogger(__name__)
-settings = get_settings()
 
 
 class ShareCreate(BaseModel):
     report_id: str
     expires_at: Optional[datetime] = None
+    expires_in: Optional[int] = None
 
 
 class ShareResponse(BaseModel):
@@ -101,18 +96,22 @@ async def create_share(body: ShareCreate, request: Request) -> ShareResponse:
         share_id = str(uuid.uuid4())
         created_at = datetime.utcnow()
 
+        expires_at = body.expires_at
+        if expires_at is None and body.expires_in is not None:
+            expires_at = created_at + timedelta(seconds=body.expires_in)
+
         await db.execute(
             sa.text(
                 """
                 INSERT INTO public_shares (id, report_id, token, expires_at, revoked, created_at)
-                VALUES (:id, :report_id, :token, :expires_at, 0, :created_at)
+                VALUES (:id, :report_id, :token, :expires_at, FALSE, :created_at)
                 """
             ),
             {
                 "id": share_id,
                 "report_id": body.report_id,
                 "token": token,
-                "expires_at": body.expires_at,
+                "expires_at": expires_at,
                 "created_at": created_at,
             },
         )
@@ -147,7 +146,7 @@ async def create_share(body: ShareCreate, request: Request) -> ShareResponse:
         )
         await db.commit()
 
-        return ShareResponse(id=share_id, token=token, url=share_url, expires_at=body.expires_at)
+        return ShareResponse(id=share_id, token=token, url=share_url, expires_at=expires_at)
     except Exception:
         await db.rollback()
         raise
@@ -179,7 +178,7 @@ async def revoke_share(token: str, request: Request) -> Dict[str, Any]:
             sa.text(
                 """
                 UPDATE public_shares
-                SET revoked = 1
+                SET revoked = TRUE
                 WHERE token = :token
                 """
             ),
@@ -227,87 +226,6 @@ def _has_expired(expires_at: Optional[datetime]) -> bool:
     if expires_at.tzinfo is None:
         expires_at = expires_at.replace(tzinfo=timezone.utc)
     return expires_at < datetime.now(timezone.utc)
-
-
-def _absolute_shortlink_target(target: str) -> str:
-    if target.startswith("http://") or target.startswith("https://"):
-        return target
-    base = str(settings.base_url) if settings.base_url else ""
-    if base:
-        return f"{base.rstrip('/')}{target}"
-    return target
-
-
-@public_router.get("/l/{code}")
-async def shortlink_redirect(code: str, request: Request) -> RedirectResponse:
-    db = await get_db()
-    try:
-        dialect = db.session.bind.dialect.name if hasattr(db, "session") else "sqlite"
-        pattern = f'%"code":"{code}"%'
-        if dialect == "postgresql":
-            query = sa.text(
-                "SELECT id, payload FROM outbox_messages "
-                "WHERE payload::text LIKE :pattern ORDER BY created_at DESC LIMIT 5"
-            )
-        else:
-            query = sa.text(
-                "SELECT id, payload FROM outbox_messages "
-                "WHERE payload LIKE :pattern ORDER BY created_at DESC LIMIT 5"
-            )
-        rows = await db.fetch_all(query, {"pattern": pattern})
-    finally:
-        await db.close()
-
-    message_id: Optional[str] = None
-    shortlink_meta: Optional[Dict[str, Any]] = None
-    target_value: Optional[str] = None
-
-    for row in rows:
-        payload = row["payload"] if isinstance(row, dict) else row[1]
-        if isinstance(payload, str):
-            try:
-                payload = json.loads(payload)
-            except json.JSONDecodeError:
-                continue
-        if not isinstance(payload, dict):
-            continue
-        context_url = None
-        context = payload.get("context")
-        if isinstance(context, dict):
-            context_url = context.get("share_url")
-        for entry in payload.get("shortlinks", []):
-            if entry.get("code") == code:
-                message_id = row["id"] if isinstance(row, dict) else row[0]
-                shortlink_meta = entry
-                target_value = entry.get("target") or entry.get("url") or context_url
-                break
-        if message_id:
-            break
-
-    if not target_value and shortlink_meta is None and rows:
-        # Attempt fallback to last inspected payload context
-        try:
-            payload = rows[0]["payload"] if isinstance(rows[0], dict) else rows[0][1]
-            if isinstance(payload, str):
-                payload = json.loads(payload)
-            if isinstance(payload, dict):
-                context = payload.get("context")
-                if isinstance(context, dict):
-                    target_value = context.get("share_url")
-        except Exception:  # noqa: BLE001 - fallback best effort
-            target_value = None
-
-    if not message_id or not target_value:
-        raise HTTPException(status_code=404, detail="Shortlink not found")
-
-    register_click_event(message_id, shortlink_meta or {"code": code, "target": target_value})
-
-    redirect_url = _absolute_shortlink_target(target_value)
-    logger.info(
-        "shortlink.redirect",
-        extra={"code": code, "message_id": message_id, "target": redirect_url},
-    )
-    return RedirectResponse(url=redirect_url, status_code=302)
 
 
 @public_router.get("/r/{token}")

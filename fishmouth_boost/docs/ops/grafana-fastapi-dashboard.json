@@ -1,0 +1,20 @@
+{
+  "title": "FastAPI Golden Signals (Example)",
+  "panels": [
+    {
+      "type": "graph",
+      "title": "Requests per second",
+      "id": 1
+    },
+    {
+      "type": "graph",
+      "title": "p95 latency (ms)",
+      "id": 2
+    },
+    {
+      "type": "graph",
+      "title": "HTTP 5xx by route",
+      "id": 3
+    }
+  ]
+}

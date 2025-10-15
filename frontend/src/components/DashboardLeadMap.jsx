@@ -1,4 +1,7 @@
-import React, { useMemo } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
+import Map, { Layer, Marker, Source } from 'react-map-gl/maplibre';
+import maplibregl from 'maplibre-gl';
+import 'maplibre-gl/dist/maplibre-gl.css';
 import { Eye, Image as ImageIcon, Mail, MapPin, Phone, Sparkles } from 'lucide-react';
 
 const ACTION_POINT_VALUES = {
@@ -26,26 +29,167 @@ const URGENCY_BADGES = {
   unknown: 'bg-slate-500/20 text-slate-200 border border-slate-500/35',
 };
 
-const MapBackground = ({ isDark }) => (
-  <div
-    className={`absolute inset-0 ${
-      isDark
-        ? 'bg-gradient-to-br from-slate-900 via-slate-950 to-slate-900'
-        : 'bg-gradient-to-br from-slate-100 via-white to-slate-200'
-    }`}
-  >
-    <div className="absolute inset-0 opacity-25 bg-[radial-gradient(circle_at_top,_rgba(79,70,229,0.45),_transparent_55%)]" />
-    <div className="absolute inset-0 opacity-10 bg-[radial-gradient(circle_at_bottom,_rgba(16,185,129,0.4),_transparent_55%)]" />
-    <div className="absolute inset-0 mix-blend-overlay opacity-30 bg-[url('https://images.fishmouth.ai/demo/map-grid.png')]" />
-  </div>
-);
+const MAPBOX_TOKEN = process.env.REACT_APP_MAPBOX_TOKEN || '';
+const BASE_MAP_STYLE = MAPBOX_TOKEN
+  ? `https://api.mapbox.com/styles/v1/mapbox/satellite-streets-v12?access_token=${MAPBOX_TOKEN}`
+  : {
+      version: 8,
+      name: 'esri-satellite',
+      sources: {
+        'esri-satellite': {
+          type: 'raster',
+          tiles: [
+            'https://services.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}'
+          ],
+          tileSize: 256,
+          attribution: 'Imagery © Esri & contributors',
+        },
+      },
+      layers: [
+        {
+          id: 'esri-satellite',
+          type: 'raster',
+          source: 'esri-satellite',
+        },
+      ],
+    };
 
-const generatePosition = (seed) => {
-  if (!seed) return { top: '48%', left: '48%', hash: 0 };
-  const hash = Array.from(seed.toString()).reduce((sum, char) => sum + char.charCodeAt(0), 0);
-  const vertical = (hash % 60) + 18;
-  const horizontal = ((hash * 7) % 70) + 18;
-  return { top: `${vertical}%`, left: `${horizontal}%`, hash };
+const DEFAULT_VIEW = {
+  latitude: 30.2672,
+  longitude: -97.7431,
+  zoom: 4,
+};
+
+const markerUrgencyThemes = {
+  critical: 'bg-red-600 text-white hover:bg-red-500',
+  high: 'bg-orange-500 text-white hover:bg-orange-400',
+  medium: 'bg-amber-500 text-white hover:bg-amber-400',
+  normal: 'bg-emerald-500 text-white hover:bg-emerald-400',
+  unknown: 'bg-slate-800/90 text-white hover:bg-slate-700',
+};
+
+const asNumber = (value) => {
+  if (value == null) return null;
+  const num = typeof value === 'string' ? parseFloat(value) : Number(value);
+  return Number.isFinite(num) ? num : null;
+};
+
+const hashString = (value) => {
+  const string = String(value ?? '');
+  let hash = 0;
+  for (let index = 0; index < string.length; index += 1) {
+    hash = (hash * 31 + string.charCodeAt(index)) & 0xffffffff;
+  }
+  return hash >>> 0;
+};
+
+const clamp = (value, min, max) => Math.min(Math.max(value, min), max);
+
+const extractCoordinates = (entity, options = {}) => {
+  if (!entity || typeof entity !== 'object') {
+    return null;
+  }
+
+  const latCandidates = [
+    entity.latitude,
+    entity.lat,
+    entity.lat_deg,
+    entity.latitud,
+    entity.geo?.lat,
+    entity.geo?.latitude,
+    entity.location?.lat,
+    entity.location?.latitude,
+    entity.coordinates?.[1],
+    Array.isArray(entity.center) ? entity.center[1] : null,
+    entity.position?.lat,
+    entity.centroid?.lat,
+  ];
+
+  const lonCandidates = [
+    entity.longitude,
+    entity.lon,
+    entity.lng,
+    entity.long,
+    entity.geo?.lng,
+    entity.geo?.lon,
+    entity.geo?.longitude,
+    entity.location?.lng,
+    entity.location?.lon,
+    entity.location?.longitude,
+    entity.coordinates?.[0],
+    Array.isArray(entity.center) ? entity.center[0] : null,
+    entity.position?.lng,
+    entity.centroid?.lng,
+  ];
+
+  const latitude = latCandidates.map(asNumber).find((value) => value != null && Math.abs(value) <= 90);
+  const longitude = lonCandidates.map(asNumber).find((value) => value != null && Math.abs(value) <= 180);
+
+  if (latitude == null || longitude == null) {
+    const fallbackSeed =
+      options.seed ??
+      [
+        entity.address,
+        entity.city,
+        entity.state,
+        entity.zip_code,
+        entity.area_name,
+        entity.id,
+      ]
+        .filter(Boolean)
+        .join('|');
+
+    if (!fallbackSeed) {
+      return null;
+    }
+
+    const hash = hashString(fallbackSeed);
+    const latSpread = options.latSpread ?? 0.45;
+    const lonSpread = options.lonSpread ?? 0.6;
+
+    const latOffset = ((hash % 200000) / 100000 - 1) * latSpread;
+    const lonOffset = ((((hash / 200000) | 0) % 200000) / 100000 - 1) * lonSpread;
+
+    const fallbackLat = clamp(DEFAULT_VIEW.latitude + latOffset, -89.9, 89.9);
+    const fallbackLon = clamp(DEFAULT_VIEW.longitude + lonOffset, -179.9, 179.9);
+
+    return {
+      latitude: parseFloat(fallbackLat.toFixed(6)),
+      longitude: parseFloat(fallbackLon.toFixed(6)),
+      generated: true,
+    };
+  }
+
+  return {
+    latitude: parseFloat(latitude.toFixed(6)),
+    longitude: parseFloat(longitude.toFixed(6)),
+    generated: false,
+  };
+};
+
+const getEnvelope = (points) => {
+  if (!points.length) return null;
+  let minLat = points[0].latitude;
+  let maxLat = points[0].latitude;
+  let minLon = points[0].longitude;
+  let maxLon = points[0].longitude;
+
+  points.forEach((point) => {
+    if (point.latitude < minLat) minLat = point.latitude;
+    if (point.latitude > maxLat) maxLat = point.latitude;
+    if (point.longitude < minLon) minLon = point.longitude;
+    if (point.longitude > maxLon) maxLon = point.longitude;
+  });
+
+  return {
+    bounds: [
+      [minLon, minLat],
+      [maxLon, maxLat],
+    ],
+    spanLat: Math.abs(maxLat - minLat),
+    spanLon: Math.abs(maxLon - minLon),
+    center: [(minLon + maxLon) / 2, (minLat + maxLat) / 2],
+  };
 };
 
 const formatLocation = (lead) => {
@@ -103,6 +247,135 @@ const DashboardLeadMap = ({
   const featuredEntries = useMemo(() => visibleEntries.slice(0, 4), [visibleEntries]);
   const supplementalEntries = useMemo(() => visibleEntries.slice(4), [visibleEntries]);
 
+  const mapRef = useRef(null);
+  const [mapLoaded, setMapLoaded] = useState(false);
+  const lastFitBoundsKeyRef = useRef(null);
+  const lastSelectionKeyRef = useRef(null);
+
+  const mapEntries = useMemo(
+    () =>
+      featuredEntries
+        .map((entry) => {
+          const coords = extractCoordinates(entry.lead);
+          if (!coords) return null;
+          return {
+            entry,
+            lead: entry.lead,
+            latitude: coords.latitude,
+            longitude: coords.longitude,
+            urgency: entry.urgency?.level || entry.lead.replacement_urgency || 'unknown',
+            score: Math.round(entry.lead?.lead_score || entry.lead?.score || 0),
+          };
+        })
+        .filter(Boolean),
+    [featuredEntries]
+  );
+
+  const clusterEntries = useMemo(
+    () =>
+      (clusters || [])
+        .map((cluster) => {
+          const coords = extractCoordinates(cluster, {
+            seed: cluster.area_name || cluster.city || cluster.id,
+            latSpread: 1.2,
+            lonSpread: 1.4,
+          });
+          if (!coords) return null;
+          return {
+            id: cluster.id ?? cluster.area_name ?? cluster.city ?? `${coords.latitude}:${coords.longitude}`,
+            latitude: coords.latitude,
+            longitude: coords.longitude,
+            intensity:
+              asNumber(cluster.hot_leads) ??
+              asNumber(cluster.deal_count) ??
+              asNumber(cluster.density) ??
+              asNumber(cluster.score) ??
+              1,
+          };
+        })
+        .filter(Boolean),
+    [clusters]
+  );
+
+  const mapFeatureCollection = useMemo(
+    () =>
+      mapEntries.length
+        ? {
+            type: 'FeatureCollection',
+            features: mapEntries.map((point) => ({
+              type: 'Feature',
+              geometry: {
+                type: 'Point',
+                coordinates: [point.longitude, point.latitude],
+              },
+              properties: {
+                leadId: point.lead?.id,
+                urgency: point.urgency,
+                score: point.score,
+              },
+            })),
+          }
+        : null,
+    [mapEntries]
+  );
+
+  const clusterFeatureCollection = useMemo(
+    () =>
+      clusterEntries.length
+        ? {
+            type: 'FeatureCollection',
+            features: clusterEntries.map((cluster) => ({
+              type: 'Feature',
+              geometry: {
+                type: 'Point',
+                coordinates: [cluster.longitude, cluster.latitude],
+              },
+              properties: {
+                id: cluster.id,
+                intensity: cluster.intensity,
+              },
+            })),
+          }
+        : {
+            type: 'FeatureCollection',
+            features: [
+              {
+                type: 'Feature',
+                geometry: { type: 'Point', coordinates: [-97.7419, 30.2637] },
+                properties: { id: 'demo-0', intensity: 11 },
+              },
+              {
+                type: 'Feature',
+                geometry: { type: 'Point', coordinates: [-97.7812, 30.2732] },
+                properties: { id: 'demo-1', intensity: 9 },
+              },
+              {
+                type: 'Feature',
+                geometry: { type: 'Point', coordinates: [-97.7208, 30.2934] },
+                properties: { id: 'demo-2', intensity: 12 },
+              },
+              {
+                type: 'Feature',
+                geometry: { type: 'Point', coordinates: [-97.705, 30.215] },
+                properties: { id: 'demo-3', intensity: 8 },
+              },
+              {
+                type: 'Feature',
+                geometry: { type: 'Point', coordinates: [-97.8, 30.325] },
+                properties: { id: 'demo-4', intensity: 7 },
+              },
+              {
+                type: 'Feature',
+                geometry: { type: 'Point', coordinates: [-97.67, 30.255] },
+                properties: { id: 'demo-5', intensity: 10 },
+              },
+            ],
+          },
+    [clusterEntries]
+  );
+
+  const mapEnvelope = useMemo(() => getEnvelope(mapEntries), [mapEntries]);
+
   const selectedEntry = useMemo(() => {
     if (!visibleEntries.length) return null;
     if (!selectedLeadId) return visibleEntries[0];
@@ -113,33 +386,136 @@ const DashboardLeadMap = ({
   }, [visibleEntries, selectedLeadId]);
 
   const selectedLead = selectedEntry?.lead || null;
+  const selectedMapEntry = useMemo(() => {
+    if (!selectedLead) return null;
+    return (
+      mapEntries.find((point) => Number(point.lead?.id) === Number(selectedLead.id)) || null
+    );
+  }, [mapEntries, selectedLead]);
+
+  const selectedHighlightCollection = useMemo(
+    () =>
+      selectedMapEntry
+        ? {
+            type: 'FeatureCollection',
+            features: [
+              {
+                type: 'Feature',
+                geometry: {
+                  type: 'Point',
+                  coordinates: [selectedMapEntry.longitude, selectedMapEntry.latitude],
+                },
+              },
+            ],
+          }
+        : null,
+    [selectedMapEntry]
+  );
+
+  const mapEntriesKey = useMemo(
+    () => mapEntries.map((point) => `${point.longitude.toFixed(4)}:${point.latitude.toFixed(4)}`).join('|'),
+    [mapEntries]
+  );
+
+  const selectedMapEntryKey = selectedMapEntry
+    ? `${selectedMapEntry.lead?.id ?? 'lead'}:${selectedMapEntry.longitude.toFixed(4)}:${selectedMapEntry.latitude.toFixed(4)}`
+    : null;
+
+  const initialViewState = useMemo(() => {
+    if (selectedMapEntry) {
+      return {
+        longitude: selectedMapEntry.longitude,
+        latitude: selectedMapEntry.latitude,
+        zoom: 12,
+        bearing: 0,
+        pitch: 0,
+      };
+    }
+    if (mapEntries.length) {
+      const first = mapEntries[0];
+      return {
+        longitude: first.longitude,
+        latitude: first.latitude,
+        zoom: mapEntries.length === 1 ? 12 : 10,
+        bearing: 0,
+        pitch: 0,
+      };
+    }
+    return {
+      longitude: DEFAULT_VIEW.longitude,
+      latitude: DEFAULT_VIEW.latitude,
+      zoom: DEFAULT_VIEW.zoom,
+      bearing: 0,
+      pitch: 0,
+    };
+  }, [mapEntries, selectedMapEntry]);
+
   const selectedIndex = selectedLead
     ? visibleEntries.findIndex((entry) => Number(entry.lead?.id) === Number(selectedLead.id))
     : -1;
   const selectedRank = selectedIndex >= 0 ? selectedIndex + 1 : null;
 
   const totalVisible = visibleEntries.length;
-  const poolCount = entryList.length;
-  const averageScore = totalVisible
-    ? Math.round(
-        visibleEntries.reduce(
-          (acc, entry) => acc + Math.round(entry.lead?.lead_score || entry.lead?.score || 0),
-          0
-        ) / totalVisible
-      )
-    : 0;
-  const criticalCount = visibleEntries.filter((entry) => entry.urgency?.level === 'critical').length;
-  const highestScore = visibleEntries.reduce((max, entry) => {
-    const score = Math.round(entry.lead?.lead_score || entry.lead?.score || 0);
-    return score > max ? score : max;
-  }, 0);
 
   const surfacePrimary = isDark ? 'border-slate-800 bg-slate-950/70 text-slate-100' : 'border-slate-200 bg-white';
   const surfaceSecondary = isDark ? 'border-slate-800 bg-slate-900/70 text-slate-100' : 'border-slate-200 bg-white';
   const subTextClass = isDark ? 'text-slate-400' : 'text-gray-500';
   const headerTextClass = isDark ? 'text-slate-100' : 'text-gray-900';
 
-  const mapPoints = featuredEntries.map((entry) => entry.lead).filter(Boolean);
+  useEffect(() => {
+    if (!mapLoaded || !mapEnvelope || !mapEntries.length) {
+      return;
+    }
+    const mapInstance = mapRef.current?.getMap?.();
+    if (!mapInstance) return;
+
+    const boundsKey = `${mapEntriesKey}|${mapEnvelope.bounds[0][0].toFixed(4)}|${mapEnvelope.bounds[0][1].toFixed(4)}|${mapEnvelope.bounds[1][0].toFixed(4)}|${mapEnvelope.bounds[1][1].toFixed(4)}`;
+    if (lastFitBoundsKeyRef.current === boundsKey) return;
+    lastFitBoundsKeyRef.current = boundsKey;
+
+    if (mapEntries.length === 1 || (mapEnvelope.spanLat < 0.01 && mapEnvelope.spanLon < 0.01)) {
+      mapInstance.easeTo({
+        center: mapEnvelope.center,
+        zoom: Math.max(mapInstance.getZoom(), 12),
+        duration: 800,
+        essential: true,
+      });
+    } else {
+      mapInstance.fitBounds(mapEnvelope.bounds, {
+        padding: 80,
+        duration: 800,
+        maxZoom: 13,
+      });
+    }
+  }, [mapLoaded, mapEnvelope, mapEntries.length, mapEntriesKey]);
+
+  useEffect(() => {
+    if (!mapLoaded || !selectedMapEntry || !selectedMapEntryKey) {
+      return;
+    }
+    const mapInstance = mapRef.current?.getMap?.();
+    if (!mapInstance) return;
+    if (lastSelectionKeyRef.current === selectedMapEntryKey) return;
+    lastSelectionKeyRef.current = selectedMapEntryKey;
+    mapInstance.easeTo({
+      center: [selectedMapEntry.longitude, selectedMapEntry.latitude],
+      zoom: Math.max(mapInstance.getZoom(), 11.5),
+      duration: 600,
+      essential: true,
+    });
+  }, [mapLoaded, selectedMapEntry, selectedMapEntryKey]);
+
+  useEffect(() => {
+    if (!mapEntries.length) {
+      lastFitBoundsKeyRef.current = null;
+    }
+  }, [mapEntries.length]);
+
+  useEffect(() => {
+    if (!selectedMapEntryKey) {
+      lastSelectionKeyRef.current = null;
+    }
+  }, [selectedMapEntryKey]);
 
   const insightLines = useMemo(() => {
     if (!selectedLead) return [];
@@ -163,92 +539,180 @@ const DashboardLeadMap = ({
     onSelectLead?.(entry.lead);
   };
 
-  const findEntryByLeadId = (leadId) =>
-    visibleEntries.find((entry) => Number(entry.lead?.id) === Number(leadId));
-
   return (
     <section className={`rounded-[32px] border ${surfacePrimary} shadow-xl`}>
-      <div className="px-6 py-6 lg:px-8 lg:py-7 space-y-6">
-        <div className="flex flex-col gap-3">
-          <div>
-            <p className="text-xs uppercase tracking-[0.35em] text-blue-500/80">Priority radar</p>
-            <h2 className={`text-2xl font-semibold ${headerTextClass}`}>Hot lead command center</h2>
-          </div>
-          <div className="flex flex-wrap items-center gap-3 text-xs">
-            <span
-              className={`inline-flex items-center gap-1 rounded-full px-2.5 py-1 ${
-                isDark ? 'bg-slate-800/70 text-emerald-200' : 'bg-emerald-100 text-emerald-700'
-              }`}
-            >
-              {totalVisible.toLocaleString()} showing
-            </span>
-            <span className={subTextClass}>Pool {poolCount.toLocaleString()}</span>
-            <span className={subTextClass}>Avg score {averageScore}</span>
-            <span className={subTextClass}>Critical {criticalCount}</span>
-            <span className={subTextClass}>Peak {highestScore}</span>
-          </div>
-        </div>
+      <div className="px-6 py-6 lg:px-8 lg:py-7 space-y-4">
+        <h3 className={`text-sm font-semibold uppercase tracking-wide ${headerTextClass}`}>Lead Spotlight</h3>
 
         <div className="grid gap-6 xl:grid-cols-[minmax(0,1.35fr)_minmax(0,0.9fr)] items-stretch">
           <div
-            className={`relative rounded-3xl overflow-hidden border h-full min-h-[320px] ${
+            className={`relative rounded-3xl overflow-hidden border h-full min-h-[220px] ${
               isDark ? 'border-slate-800/70' : 'border-slate-200/80'
             } shadow-lg`}
           >
-            <MapBackground isDark={isDark} />
-            <div className="absolute inset-0">
-              {clusters.slice(0, 5).map((cluster, idx) => {
-                const position = generatePosition(cluster?.area_name || idx);
-                return (
-                  <div
-                    key={`cluster-${cluster?.id || idx}`}
-                    style={{ top: position.top, left: position.left }}
-                    className="absolute -translate-x-1/2 -translate-y-1/2 text-[11px]"
-                  >
-                    <div
-                      className={`px-2 py-1 rounded-full shadow ${
-                        isDark ? 'bg-emerald-500/20 text-emerald-200' : 'bg-emerald-100 text-emerald-700'
-                      }`}
-                    >
-                      {cluster?.area_name || cluster?.city || 'Storm pocket'}
-                    </div>
-                  </div>
-                );
-              })}
-              {mapPoints.map((lead, idx) => {
-                if (!lead) return null;
-                const seed = lead?.zip_code || lead?.address || lead?.city || idx;
-                const position = generatePosition(seed);
-                const isActive =
-                  selectedLead && Number(selectedLead.id) === Number(lead?.id);
+            <Map
+              ref={mapRef}
+              mapLib={maplibregl}
+              initialViewState={initialViewState}
+              mapStyle={BASE_MAP_STYLE}
+              style={{ width: '100%', height: '100%' }}
+              onLoad={() => setMapLoaded(true)}
+              dragRotate={false}
+            >
+              {clusterFeatureCollection && (
+                <Source id="hot-lead-clusters" type="geojson" data={clusterFeatureCollection}>
+                  <Layer
+                    id="hot-lead-clusters-glow"
+                    type="circle"
+                    paint={{
+                      'circle-radius': [
+                        'interpolate', ['linear'], ['get', 'intensity'],
+                        1, 18,
+                        5, 34,
+                        10, 52,
+                      ],
+                      'circle-color': 'rgba(248,113,113,0.22)',
+                      'circle-stroke-width': 0,
+                    }}
+                  />
+                  <Layer
+                    id="hot-lead-clusters-heat"
+                    type="heatmap"
+                    paint={{
+                      'heatmap-weight': [
+                        'interpolate', ['linear'], ['get', 'intensity'],
+                        1, 0.2,
+                        5, 0.6,
+                        10, 1,
+                      ],
+                      'heatmap-intensity': [
+                        'interpolate', ['linear'], ['zoom'],
+                        6, 0.4,
+                        10, 0.9,
+                        13, 1.4,
+                      ],
+                      'heatmap-radius': [
+                        'interpolate', ['linear'], ['zoom'],
+                        6, 24,
+                        10, 40,
+                        13, 60,
+                      ],
+                      'heatmap-color': [
+                        'interpolate', ['linear'], ['heatmap-density'],
+                        0, 'rgba(2,132,199,0)',
+                        0.2, 'rgba(56,189,248,0.35)',
+                        0.4, 'rgba(59,130,246,0.55)',
+                        0.6, 'rgba(99,102,241,0.65)',
+                        0.8, 'rgba(192,38,211,0.75)',
+                        1, 'rgba(244,63,94,0.85)',
+                      ],
+                      'heatmap-opacity': 0.65,
+                    }}
+                  />
+                </Source>
+              )}
+              {mapFeatureCollection && (
+                <Source id="hot-leads" type="geojson" data={mapFeatureCollection}>
+                  <Layer
+                    id="hot-leads-halo"
+                    type="circle"
+                    paint={{
+                      'circle-radius': [
+                        'interpolate',
+                        ['linear'],
+                        ['zoom'],
+                        6, 4,
+                        11, 10,
+                        14, 18,
+                      ],
+                      'circle-color': [
+                        'match',
+                        ['get', 'urgency'],
+                        'critical', 'rgba(239,68,68,0.35)',
+                        'high', 'rgba(249,115,22,0.32)',
+                        'medium', 'rgba(250,204,21,0.28)',
+                        'normal', 'rgba(16,185,129,0.25)',
+                        'rgba(59,130,246,0.25)',
+                      ],
+                      'circle-opacity': 0.6,
+                    }}
+                  />
+                </Source>
+              )}
+              {selectedHighlightCollection && (
+                <Source id="selected-hot-lead" type="geojson" data={selectedHighlightCollection}>
+                  <Layer
+                    id="selected-hot-lead-ring"
+                    type="circle"
+                    paint={{
+                      'circle-radius': [
+                        'interpolate',
+                        ['linear'],
+                        ['zoom'],
+                        6, 8,
+                        11, 16,
+                        14, 26,
+                      ],
+                      'circle-color': 'rgba(59,130,246,0.18)',
+                      'circle-stroke-width': 2,
+                      'circle-stroke-color': '#0ea5e9',
+                      'circle-opacity': 0.7,
+                    }}
+                  />
+                </Source>
+              )}
+              {mapEntries.map((item) => {
+                const { lead, entry, longitude, latitude, urgency } = item;
+                const isActive = selectedLead && Number(selectedLead.id) === Number(lead?.id);
                 const isRewarded =
                   recentlyRewardedLeadId != null &&
                   Number(recentlyRewardedLeadId) === Number(lead?.id);
+                const toneClass = markerUrgencyThemes[urgency] || markerUrgencyThemes.unknown;
+                const markerClass = isActive
+                  ? 'bg-blue-600 text-white scale-110 shadow-blue-400/40 hover:bg-blue-500'
+                  : toneClass;
+
                 return (
-                  <button
-                    type="button"
-                    key={`map-lead-${lead?.id || idx}`}
-                    style={{ top: position.top, left: position.left }}
-                    onClick={() => {
-                      const entry = findEntryByLeadId(lead?.id);
-                      handleSelectEntry(entry || { lead });
-                    }}
-                    className={`absolute -translate-x-1/2 -translate-y-1/2 rounded-full px-3 py-1.5 text-xs font-semibold shadow-xl transition ${
-                      isActive
-                        ? 'bg-blue-600 text-white scale-110 shadow-blue-400/40'
-                        : isDark
-                        ? 'bg-slate-900/80 text-slate-100 hover:bg-blue-500/80 hover:text-white'
-                        : 'bg-white/95 text-gray-700 hover:bg-blue-100 hover:text-blue-700'
-                    } ${isRewarded ? 'ring-2 ring-emerald-400/70' : ''}`}
+                  <Marker
+                    key={`map-lead-${lead?.id ?? `${longitude}-${latitude}`}`}
+                    longitude={longitude}
+                    latitude={latitude}
+                    anchor="bottom"
                   >
-                    <span className="inline-flex items-center gap-1">
+                    <button
+                      type="button"
+                      onClick={() => handleSelectEntry(entry)}
+                      className={`inline-flex items-center gap-1 rounded-full px-3 py-1.5 text-xs font-semibold shadow-lg transition transform ${
+                        markerClass
+                      } ${
+                        isRewarded ? 'ring-2 ring-emerald-400/70 ring-offset-2 ring-offset-transparent' : ''
+                      } focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400`}
+                      title={lead?.address || lead?.homeowner_name || lead?.name || 'Lead'}
+                    >
                       <MapPin className="w-3 h-3" />
-                      {lead?.homeowner_name || lead?.name || lead?.address || `Lead ${lead?.id}`}
-                    </span>
-                  </button>
+                      <span className="max-w-[140px] truncate text-left">
+                        {lead?.homeowner_name || lead?.name || lead?.address || `Lead ${lead?.id}`}
+                      </span>
+                    </button>
+                  </Marker>
                 );
               })}
-            </div>
+            </Map>
+            <div className="pointer-events-none absolute inset-0 opacity-25 mix-blend-soft-light bg-[radial-gradient(circle_at_top,_rgba(96,165,250,0.55),_transparent_65%)]" />
+            <div className="pointer-events-none absolute inset-0 opacity-15 mix-blend-soft-light bg-[radial-gradient(circle_at_bottom,_rgba(34,197,94,0.45),_transparent_65%)]" />
+            {!mapEntries.length && (
+              <div
+                className={`absolute inset-0 flex flex-col items-center justify-center gap-2 text-xs font-semibold ${
+                  isDark ? 'text-slate-200 bg-slate-950/90' : 'text-slate-600 bg-white/85'
+                } backdrop-blur-sm`}
+              >
+                <MapPin className="w-5 h-5 opacity-70" />
+                <span>No geocoded leads to plot yet.</span>
+                <span className="text-[11px] font-normal opacity-70">
+                  Run a scan or add coordinates to visualize hot leads.
+                </span>
+              </div>
+            )}
           </div>
 
           {selectedLead && (

@@ -1,29 +1,19 @@
-# Fish Mouth Boost – Production Readiness & Feature Pack (Full)
+# Fish Mouth Boost Pack (Unified)
 
-This package adds **docs**, **PRDs**, **skeleton code**, **SQL migrations**, **frontend stubs**,
-**runbooks**, and a **Postman collection** to accelerate implementation of the Fish Mouth app.
+This pack contains **production-ready PRDs**, **ready-to-paste code stubs**, **SQL migrations**,
+**frontend components**, **Postman smoke tests**, **CI**, and **ops runbooks** to implement the
+recommendations discussed. It is designed to drop into your repo and be integrated **one stage at a time**.
 
-Created: 2025-10-14
+## Folder map
 
-## How to use
-1. **Unzip** into your repository root (or a staging branch).
-2. **Apply** SQL migrations in `/boost/migrations` using Alembic or psql.
-3. **Mount** the routers from `/boost/backend/app/api/v1` into your FastAPI app.
-4. **Integrate** the library helpers from `/boost/backend/lib` and services under `/boost/backend/services`.
-5. **Add** the React stubs from `/boost/frontend/src` into your frontend and wire routes.
-6. **Follow** the PRDs in `/docs/prd` and use `/docs/CODEX_INSTRUCTIONS.md` with CodeX Pro.
-7. **Run** the Postman collection in `/boost/postman` to verify end-to-end flows.
+- `docs/prd/` — PRDs (00–16) for Reporting, Templates/Tokens, Messaging, Sequences, Intelligence v1.5, ETL/Provenance/Consent, Ops Dashboard, Dashboard Home, Sequence Nodes, Call Log, Roof Scanner, Cost Strategy, Growth, Marketing Homepage, App Config, Server Hardening.
+- `docs/ops/` — Renderer runbook, SRE runbook, Grafana dashboard JSON.
+- `docs/CODEX_INSTRUCTIONS.md` — One script to paste into CodeX Pro that runs the staged implementation.
+- `boost/backend/` — FastAPI-ready stubs: events client, tokens resolver, rendering worker, messaging adapters, shortlinks, sequences engine, imagery providers, and API routers.
+- `boost/migrations/` — SQL DDL for events, messages, shares, templates, sequences, compliance fields, and basic billing usage.
+- `boost/frontend/` — React components: DashboardHome, LeadCard, CallLogPanel, ScanWizard, Sequence node types, appConfig sample.
+- `boost/postman/` — Postman collection for smoke tests.
+- `boost/config/` — `.env.example` and a `docker-compose.override.prod.yml` with healthchecks and env fixes.
+- `.github/workflows/ci.yml` — CI pipeline with lint/test and basic security scans.
 
-## Folder Overview
-- `docs/prd/` – All PRDs (PRD-00 ... PRD-16) covering features and infra.
-- `boost/backend/` – Backend helpers, services, and API endpoints stubs.
-- `boost/frontend/` – Dashboard, Leads, Call Log, Scanner, App Config stubs.
-- `boost/migrations/` – SQL migration drafts to create necessary tables/columns.
-- `boost/postman/` – Postman collection for basic smoke tests.
-- `boost/config/` – .env example and compose overrides.
-- `docs/ops/` – Runbooks and example Grafana dashboard JSON.
-- `docs/CODEX_INSTRUCTIONS.md` – One script to instruct CodeX Pro.
-
-## Note
-These are **scaffolds** meant to integrate with your existing app. Areas marked `TODO` or
-"placeholder" should be replaced with your real implementations.
+> **Integration order:** Use `docs/CODEX_INSTRUCTIONS.md` and follow Stage 1–10.

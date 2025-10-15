@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 from datetime import datetime, timedelta
-from typing import Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 import sqlalchemy as sa
 from sqlalchemy.dialects.postgresql import insert
@@ -14,6 +14,7 @@ from app.models import ContagionCluster, PropertyScore
 from services.ai.roof_intelligence import EnhancedRoofAnalysisPipeline
 from services.providers.property_enrichment import PropertyProfile
 from storage import save_overlay_png
+from shapely.geometry import shape
 
 
 logger = logging.getLogger(__name__)
@@ -339,6 +340,66 @@ class ContagionAnalyzerService:
                 params,
             )
             return [dict(row) for row in rows]
+        finally:
+            await db.close()
+
+    @classmethod
+    async def list_clusters_in_geometry(
+        cls,
+        geojson: Dict[str, Any],
+        limit: int = 50,
+    ) -> List[Dict[str, object]]:
+        geom = shape(geojson)
+        if geom.is_empty:
+            return []
+        if geom.geom_type not in {"Polygon", "MultiPolygon"}:
+            raise ValueError("Heatmap analysis expects a polygon geometry")
+
+        wkt = geom.wkt
+
+        db = await get_db()
+        try:
+            rows = await db.fetch_all(
+                sa.text(
+                    """
+                    SELECT
+                        id,
+                        city,
+                        state,
+                        permit_count,
+                        avg_permit_value,
+                        date_range_start,
+                        date_range_end,
+                        cluster_score,
+                        cluster_status,
+                        metadata,
+                        last_scored_at,
+                        properties_in_cluster,
+                        properties_scored,
+                        ST_Y(cluster_center::geometry) AS center_latitude,
+                        ST_X(cluster_center::geometry) AS center_longitude
+                    FROM contagion_clusters
+                    WHERE cluster_center IS NOT NULL
+                      AND ST_Within(cluster_center::geometry, ST_GeomFromText(:wkt, 4326))
+                    ORDER BY cluster_score DESC NULLS LAST, last_scored_at DESC NULLS LAST
+                    LIMIT :limit
+                    """
+                ),
+                {"wkt": wkt, "limit": limit},
+            )
+
+            clusters: List[Dict[str, object]] = []
+            for row in rows:
+                cluster = dict(row)
+                for key in ("center_latitude", "center_longitude", "avg_permit_value", "cluster_score"):
+                    if cluster.get(key) is not None:
+                        cluster[key] = float(cluster[key])
+                for key in ("date_range_start", "date_range_end", "last_scored_at"):
+                    value = cluster.get(key)
+                    if value is not None and hasattr(value, "isoformat"):
+                        cluster[key] = value.isoformat()
+                clusters.append(cluster)
+            return clusters
         finally:
             await db.close()
 

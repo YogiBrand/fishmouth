@@ -46,6 +46,7 @@ def _absolute_url(path: str) -> str:
 
 
 def _record_event(session: Session, message_id: str, event_type: str, meta: Dict[str, Any]) -> None:
+    message_id = str(message_id)
     event = MessageEvent(
         message_id=message_id,
         type=event_type,
@@ -57,12 +58,15 @@ def _record_event(session: Session, message_id: str, event_type: str, meta: Dict
 
 def _emit_domain_event(session: Session, message: OutboxMessage, event_type: str, payload: Dict[str, Any]) -> None:
     try:
+        event_payload = {**payload, "message_id": str(message.id), "channel": message.channel}
+        lead_id_value = payload.get("lead_id")
+        report_id_value = payload.get("report_id")
         ev = DomainEvent(
             type=f"message.{event_type}",
             source_service="messaging.outbox",
-            report_id=payload.get("report_id"),
-            lead_id=payload.get("lead_id"),
-            payload={**payload, "message_id": message.id, "channel": message.channel},
+            report_id=str(report_id_value) if report_id_value is not None else None,
+            lead_id=str(lead_id_value) if lead_id_value is not None else None,
+            payload=event_payload,
         )
         emit_event(session, ev)
     except Exception as exc:  # pragma: no cover - defensive
@@ -114,7 +118,7 @@ def _sync_prospect_from_message_event(
     metadata.update({
         "last_message_event": event_type,
         "last_message_at": occurred_at.isoformat(),
-        "outbox_id": message.id,
+        "outbox_id": str(message.id),
     })
     prospect.metadata = metadata
 
@@ -122,7 +126,7 @@ def _sync_prospect_from_message_event(
         ContractorProspectEvent(
             prospect_id=prospect.id,
             type=f"outreach.{event_type}",
-            payload={**meta, "message_id": message.id},
+        payload={**meta, "message_id": str(message.id)},
             occurred_at=occurred_at,
         )
     )
@@ -264,7 +268,7 @@ def queue_outbox_message(
         payload["headers"] = headers_map
 
         custom_args = dict(payload.get("custom_args") or {})
-        custom_args.setdefault("outbox_id", message.id)
+        custom_args.setdefault("outbox_id", str(message.id))
         payload["custom_args"] = custom_args
 
         message.payload = payload
@@ -275,7 +279,7 @@ def queue_outbox_message(
         session.commit()
         logger.info("outbox.queued", extra={"id": message.id, "channel": channel})
         return {
-            "id": message.id,
+            "id": str(message.id),
             "status": message.status,
             "shortlinks": shortlinks,
         }
@@ -324,7 +328,7 @@ def deliver_outbox_message(message_id: str) -> Dict[str, Any]:
                 headers_map = dict(message.payload.get("headers") or {})
                 headers_map.setdefault("X-Fishmouth-Message-ID", message.id)
                 custom_args = dict(message.payload.get("custom_args") or {})
-                custom_args.setdefault("message_id", message.id)
+                custom_args.setdefault("message_id", str(message.id))
                 if message.payload.get("context"):
                     custom_args.setdefault("context", message.payload.get("context"))
                 attachments = [
@@ -336,7 +340,7 @@ def deliver_outbox_message(message_id: str) -> Dict[str, Any]:
                 payload_snapshot["custom_args"] = custom_args
                 if attachments:
                     payload_snapshot["attachments"] = attachments
-                message.payload = payload_snapshot
+                message.payload = _normalize_payload_snapshot(payload_snapshot)
                 provider_result = provider.send(
                     to_address=message.to_address,
                     subject=message.subject,
@@ -356,13 +360,13 @@ def deliver_outbox_message(message_id: str) -> Dict[str, Any]:
                 )
                 payload_snapshot = dict(message.payload)
                 payload_snapshot["tags"] = [f"message_id:{message.id}"]
-                payload_snapshot["metadata"] = {"message_id": message.id}
-                message.payload = payload_snapshot
+                payload_snapshot["metadata"] = {"message_id": str(message.id)}
+                message.payload = _normalize_payload_snapshot(payload_snapshot)
                 provider_result = provider.send(
                     to_number=message.to_address,
                     text=message.body_text or message.body_html or "",
-                    tags={"message_id": message.id},
-                    metadata={"message_id": message.id},
+                    tags={"message_id": str(message.id)},
+                    metadata={"message_id": str(message.id)},
                 )
             else:
                 raise MessagingProviderError(f"Unsupported channel: {message.channel}")
@@ -461,7 +465,7 @@ def record_message_event(
 
         event_time = occurred_at or datetime.utcnow()
         event = MessageEvent(
-            message_id=message.id,
+            message_id=str(message.id),
             type=event_type,
             meta=meta or {},
             occurred_at=event_time,
@@ -496,3 +500,15 @@ def record_message_event(
         raise
     finally:
         session.close()
+
+def _normalize_payload_snapshot(payload: Dict[str, Any]) -> Dict[str, Any]:
+    def _coerce(value: Any) -> Any:
+        if isinstance(value, dict):
+            return {k: _coerce(v) for k, v in value.items()}
+        if isinstance(value, list):
+            return [_coerce(item) for item in value]
+        if isinstance(value, (str, int, float, bool)) or value is None:
+            return value
+        return str(value)
+
+    return {key: _coerce(val) for key, val in payload.items()}

@@ -83,6 +83,12 @@ class ProviderSettings(BaseSettings):
     elevenlabs_api_key: Optional[str] = Field(None, env="ELEVENLABS_API_KEY")
     openai_api_key: Optional[str] = Field(None, env="OPENAI_API_KEY")
     anthropic_api_key: Optional[str] = Field(None, env="ANTHROPIC_API_KEY")
+    # Community street imagery + vision ranking
+    mapillary_token: Optional[str] = Field(None, env="MAPILLARY_TOKEN")
+    street_imagery_base_url: Optional[str] = Field(None, env="STREET_IMAGERY_BASE_URL")
+    openrouter_api_key: Optional[str] = Field(None, env="OPENROUTER_API_KEY")
+    openrouter_base_url: Optional[str] = Field(None, env="OPENROUTER_BASE_URL")
+    openrouter_vision_model: Optional[str] = Field(None, env="OPENROUTER_VISION_MODEL")
 
 
 class PipelineResilienceSettings(BaseSettings):

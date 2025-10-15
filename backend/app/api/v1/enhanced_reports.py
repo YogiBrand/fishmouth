@@ -147,7 +147,7 @@ async def _ensure_share_link(db, report_id: str, share_token: Optional[str], sha
         sa.text(
             """
             INSERT INTO public_shares (id, report_id, token, revoked, created_at)
-            VALUES (:id, :report_id, :token, 0, :created_at)
+            VALUES (:id, :report_id, :token, FALSE, :created_at)
             """
         ),
         {

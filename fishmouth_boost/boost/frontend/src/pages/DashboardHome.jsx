@@ -1,61 +1,68 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
+
 export default function DashboardHome() {
+  const [summary, setSummary] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+
+  useEffect(() => {
+    async function load() {
+      try {
+        const res = await fetch('/api/v1/dashboard/summary');
+        const data = await res.json();
+        setSummary(data);
+      } catch (e) {
+        setError('Failed to load dashboard');
+      } finally {
+        setLoading(false);
+      }
+    }
+    load();
+  }, []);
+
+  if (loading) return <div>Loading…</div>;
+  if (error) return <div>{error}</div>;
+  if (!summary) return <div>No data</div>;
+
+  const k = summary.kpis || {};
   return (
-    <div className="p-6 space-y-6">
-      <section className="grid grid-cols-2 md:grid-cols-6 gap-4">
-        {['HOT Leads (7d)','WARM Leads (7d)','Reports Sent','Report Views','Replies/Clicks','Appointments']
-          .map((label,i)=>(
-            <div key={i} className="rounded-lg border p-4">
-              <div className="text-sm text-gray-500">{label}</div>
-              <div className="text-2xl font-semibold">--</div>
-            </div>
+    <div className="p-4 space-y-6">
+      <section className="grid grid-cols-2 md:grid-cols-6 gap-3">
+        {Object.entries(k).map(([key, val]) => (
+          <div key={key} className="rounded border p-3">
+            <div className="text-xs uppercase opacity-60">{key.replace('_',' ')}</div>
+            <div className="text-2xl font-semibold">{val}</div>
+          </div>
         ))}
       </section>
-      <section className="space-y-2">
-        <div className="flex items-center justify-between">
-          <h2 className="text-lg font-semibold">Lead Queue</h2>
-          <div className="space-x-2">
-            <button className="btn">New Scan</button>
-            <button className="btn">Generate Report</button>
-          </div>
-        </div>
-        <div className="rounded-lg border overflow-x-auto">
-          <table className="w-full text-sm">
-            <thead className="bg-gray-50">
-              <tr>
-                <th className="p-2 text-left">Address</th>
-                <th className="p-2 text-left">Owner</th>
-                <th className="p-2 text-left">Contacts</th>
-                <th className="p-2 text-left">Roof Age</th>
-                <th className="p-2 text-left">Priority</th>
-                <th className="p-2 text-left">Confidence</th>
-                <th className="p-2 text-left">Reason</th>
-                <th className="p-2 text-left">Last Activity</th>
-                <th className="p-2 text-left">Next Step</th>
-                <th className="p-2 text-left"></th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr>
-                <td className="p-2">123 Main St</td>
-                <td className="p-2">Jane Doe</td>
-                <td className="p-2"><span className="px-2 py-1 text-xs bg-green-100 rounded">phone ✓</span></td>
-                <td className="p-2">18y</td>
-                <td className="p-2 font-semibold">88 (HOT)</td>
-                <td className="p-2">High</td>
-                <td className="p-2">Age, Granule loss</td>
-                <td className="p-2">1h ago</td>
-                <td className="p-2">Call</td>
-                <td className="p-2">
-                  <button className="btn-sm">Call</button>
-                  <button className="btn-sm">SMS</button>
-                  <button className="btn-sm">Report</button>
-                </td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
+
+      <section>
+        <h2 className="text-lg font-semibold mb-2">Funnel</h2>
+        <pre className="bg-gray-50 p-3 rounded border text-sm">{JSON.stringify(summary.funnel, null, 2)}</pre>
+      </section>
+
+      <section>
+        <h2 className="text-lg font-semibold mb-2">Activity</h2>
+        <ActivityFeed />
       </section>
     </div>
+  );
+}
+
+function ActivityFeed() {
+  const [items, setItems] = useState([]);
+  useEffect(() => {
+    fetch('/api/v1/activity').then(r => r.json()).then(d => setItems(d.items || []));
+  }, []);
+  return (
+    <ul className="divide-y">
+      {items.map((it, idx) => (
+        <li key={idx} className="py-2 text-sm">
+          <span className="font-mono text-xs opacity-60">{it.at}</span>
+          <span className="ml-2">{it.type}</span>
+          {it.report_id ? <span className="ml-2 opacity-70">#{it.report_id}</span> : null}
+        </li>
+      ))}
+    </ul>
   );
 }

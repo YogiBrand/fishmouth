@@ -8,7 +8,7 @@ from typing import Optional, Tuple
 import stripe
 
 from config import get_settings
-from models import User
+from models import User, WalletPromotion
 
 
 def _configure_stripe() -> Optional[stripe]:
@@ -86,3 +86,59 @@ def create_subscription(customer_id: str, price_id: str) -> Tuple[str, str]:
         raise RuntimeError("Subscription was created without items")
 
     return subscription["id"], items[0]["id"]
+
+
+def retrieve_checkout_session(session_id: str):
+    client = _configure_stripe()
+    if client is None:
+        return None
+    try:
+        return client.checkout.Session.retrieve(session_id)
+    except Exception:
+        return None
+
+
+def create_checkout_session(
+    *,
+    user: User,
+    amount_cents: int,
+    success_url: str,
+    cancel_url: str,
+    promotion: Optional[WalletPromotion] = None,
+    metadata: Optional[dict] = None,
+) -> Optional[dict]:
+    client = _configure_stripe()
+    if client is None:
+        return None
+
+    if amount_cents <= 0:
+        raise ValueError("Amount must be positive")
+
+    customer_id = ensure_customer(user)
+    payment_metadata = metadata.copy() if metadata else {}
+    if promotion:
+        payment_metadata.setdefault("promotion_id", promotion.id)
+        payment_metadata.setdefault("promotion_code", promotion.code)
+        payment_metadata.setdefault("promotion_multiplier", promotion.multiplier)
+
+    line_items = [
+        {
+            "price_data": {
+                "currency": "usd",
+                "product_data": {"name": "Fish Mouth Wallet Reload"},
+                "unit_amount": amount_cents,
+            },
+            "quantity": 1,
+        }
+    ]
+
+    session = client.checkout.Session.create(
+        mode="payment",
+        customer=customer_id,
+        payment_method_types=["card"],
+        line_items=line_items,
+        success_url=success_url,
+        cancel_url=cancel_url,
+        metadata=payment_metadata,
+    )
+    return session

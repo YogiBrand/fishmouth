@@ -1,6 +1,5 @@
-# PRD‑10 · Call Log & Conversation Intelligence
+# PRD‑10 · Call Log (Actionable)
 
-Capture: duration, talk/listen ratio, silence %, barge-ins, intents, objections, sentiment trajectory,
-outcome, next-action suggestions, transcript with highlights.
+Show per call: disposition, talk/listen ratio, silence %, sentiment trend, key intents/objections, next step CTA, transcript highlights (names, dates, insurer).
 
-UI: timeline markers, summary bullets, next actions, transcript pane.
+Aggregates: connect rate by hour, avg handle time, appointments per 10 dials.

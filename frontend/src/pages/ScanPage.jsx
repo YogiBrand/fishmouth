@@ -1,6 +1,9 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import DrawTool from '../components/Scanner/DrawTool';
 import api from '../services/api/client';
+import { leadAPI } from '../services/api';
+import ScannerActivityTable, { buildScannerRows } from '../components/ScannerActivityTable';
 
 const DEFAULT_POLICY = {
   order: ['naip', 'mapbox', 'google'],
@@ -15,8 +18,45 @@ export default function ScanPage() {
   const [scan, setScan] = useState(null);
   const [status, setStatus] = useState(null);
   const [error, setError] = useState(null);
+  const navigate = useNavigate();
+  const [scanSummaries, setScanSummaries] = useState([]);
+  const [clusterSummaries, setClusterSummaries] = useState([]);
+  const [tableLoading, setTableLoading] = useState(false);
 
   const canSubmit = useMemo(() => Boolean(areaFeature && areaFeature.geometry), [areaFeature]);
+
+  const refreshScannerData = useCallback(async () => {
+    setTableLoading(true);
+    const extractArray = (payload, explicitKeys = []) => {
+      if (!payload) return [];
+      if (Array.isArray(payload)) return payload;
+      const candidates = [...explicitKeys, 'items', 'data', 'results', 'records', 'list', 'scans', 'clusters'];
+      for (const key of candidates) {
+        const value = payload?.[key];
+        if (Array.isArray(value)) {
+          return value;
+        }
+      }
+      return [];
+    };
+
+    try {
+      const [scanPayload, clusterPayload] = await Promise.all([
+        leadAPI.getScans(),
+        leadAPI.getHeatClusters(),
+      ]);
+      setScanSummaries(extractArray(scanPayload, ['scans']));
+      setClusterSummaries(extractArray(clusterPayload, ['clusters']));
+    } catch (err) {
+      console.error('scan:history fetch failed', err);
+    } finally {
+      setTableLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    refreshScannerData();
+  }, [refreshScannerData]);
 
   const startScan = async () => {
     if (!canSubmit) {
@@ -34,6 +74,7 @@ export default function ScanPage() {
       const response = await api.post('/api/v1/scans', payload);
       setScan(response);
       setStatus(response.status);
+      refreshScannerData();
     } catch (err) {
       console.error('scan:create failed', err);
       setError(err?.response?.data?.detail || 'Failed to create scan');
@@ -52,13 +93,19 @@ export default function ScanPage() {
         if (next.status === 'completed' || next.status === 'failed') {
           clearInterval(interval);
           setScan((current) => ({ ...(current || {}), ...next }));
+          refreshScannerData();
         }
       } catch (err) {
         console.error('scan:poll failed', err);
       }
     }, 5000);
     return () => clearInterval(interval);
-  }, [scan?.id]);
+  }, [refreshScannerData, scan?.id, scan?.status]);
+
+  const scannerRows = useMemo(
+    () => buildScannerRows(scanSummaries, clusterSummaries),
+    [scanSummaries, clusterSummaries]
+  );
 
   return (
     <div className="p-6 space-y-4">
@@ -126,6 +173,17 @@ export default function ScanPage() {
           )}
         </div>
       )}
+
+      <ScannerActivityTable
+        className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm"
+        isDark={false}
+        rows={scannerRows}
+        scanCount={scanSummaries.length}
+        clusterCount={clusterSummaries.length}
+        loading={tableLoading}
+        onRowNavigate={(row) => navigate(row.link)}
+        emptyMessage="No scanner runs yet. Launch a SmartScan or cluster analysis to build momentum."
+      />
     </div>
   );
 }

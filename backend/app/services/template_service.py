@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Mapping, Optional
 
 from app.lib.token_resolver import (
     ALLOWED_SCOPES,
@@ -95,16 +95,38 @@ async def preview_template(
     template_id: str,
     lead_id: Optional[str] = None,
     report_id: Optional[str] = None,
+    context_override: Optional[Mapping[str, Any]] = None,
 ) -> Dict[str, Any]:
     template = await get_template(db, template_id)
     if not template:
         raise ValueError("Template not found")
 
-    context = await build_preview_context(db, lead_id=lead_id, report_id=report_id)
-    resolution: Resolution = resolve_text(template["content"], context)
+    base_context = await build_preview_context(db, lead_id=lead_id, report_id=report_id)
+    merged_context = _merge_context(base_context, context_override or {})
+    resolution: Resolution = resolve_text(template["content"], merged_context)
     return {
         "id": template["id"],
         "scope": template["scope"],
         "resolved": resolution.text,
+        "html": resolution.text,
         "unresolved_tokens": resolution.unresolved_tokens,
     }
+
+
+def _merge_context(base: Mapping[str, Any], extra: Mapping[str, Any]) -> Dict[str, Any]:
+    if not extra:
+        return dict(base)
+
+    def _merge(a: Mapping[str, Any], b: Mapping[str, Any]) -> Dict[str, Any]:
+        result: Dict[str, Any] = {key: value for key, value in a.items()}
+        for key, value in b.items():
+            if value is None:
+                continue
+            existing = result.get(key)
+            if isinstance(existing, Mapping) and isinstance(value, Mapping):
+                result[key] = _merge(existing, value)
+            else:
+                result[key] = value
+        return result
+
+    return _merge(base, extra)

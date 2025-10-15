@@ -1,13 +1,12 @@
 import React from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
-import Home from './pages/Home';
+import MarketingHome from './pages/marketing/Home';
 import Login from './pages/Login';
 import Signup from './pages/Signup';
 import AdminLogin from './pages/AdminLogin';
 import AdminDashboard from './pages/AdminDashboard';
 import Dashboard from './pages/Dashboard';
-import CaseStudies from './pages/CaseStudies';
 import ScanResults from './pages/ScanResults';
 import ScanPage from './pages/ScanPage';
 import EnhancedLeadDetailPage from './components/EnhancedLeadDetailPage';
@@ -27,6 +26,15 @@ import BillingTerms from './pages/BillingTerms';
 import ForgotPassword from './pages/ForgotPassword';
 import ResetPassword from './pages/ResetPassword';
 import VerifyEmail from './pages/VerifyEmail';
+import MarketingFeatures from './pages/marketing/Features';
+import MarketingPricing from './pages/marketing/Pricing';
+import MarketingTestimonials from './pages/marketing/Testimonials';
+import MarketingCaseStudies from './pages/marketing/CaseStudies';
+import MarketingFAQ from './pages/marketing/FAQ';
+import MarketingContact from './pages/marketing/Contact';
+import MarketingIntegrations from './pages/marketing/Integrations';
+import MarketingDemo from './pages/marketing/Demo';
+import HeatClusterDetail from './pages/HeatClusterDetail';
 
 // Protected Route Component
 const ProtectedRoute = ({ children }) => {
@@ -63,8 +71,15 @@ function App() {
         <ErrorBoundary>
         <Routes>
           {/* Public Routes */}
-          <Route path="/" element={<Home />} />
-          <Route path="/case-studies" element={<CaseStudies />} />
+          <Route path="/" element={<MarketingHome />} />
+          <Route path="/features" element={<MarketingFeatures />} />
+          <Route path="/pricing" element={<MarketingPricing />} />
+          <Route path="/testimonials" element={<MarketingTestimonials />} />
+          <Route path="/case-studies" element={<MarketingCaseStudies />} />
+          <Route path="/faq" element={<MarketingFAQ />} />
+          <Route path="/contact" element={<MarketingContact />} />
+          <Route path="/integrations" element={<MarketingIntegrations />} />
+          <Route path="/demo" element={<MarketingDemo />} />
           <Route path="/login" element={<Login />} />
           <Route path="/signup" element={<Signup />} />
           <Route path="/admin/login" element={<AdminLogin />} />
@@ -86,6 +101,15 @@ function App() {
             element={
               <ProtectedRoute>
                 <ScanResults />
+              </ProtectedRoute>
+            }
+          />
+
+          <Route
+            path="/clusters/:clusterId"
+            element={
+              <ProtectedRoute>
+                <HeatClusterDetail />
               </ProtectedRoute>
             }
           />

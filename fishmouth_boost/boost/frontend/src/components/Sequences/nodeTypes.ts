@@ -12,17 +12,17 @@ export type NodeType =
   | 'throttle'
   | 'office.hours';
 
-export const NODE_LIBRARY: Record<NodeType, {label: string, fields: string[]}> = {
-  'email.send': {label: 'Send Email', fields: ['template_id','subject','html','text','attachments']},
-  'sms.send': {label: 'Send SMS', fields: ['template_id','text']},
-  'voice.call': {label: 'Voice Call', fields: ['agent_profile_id','objective','time_window']},
-  'wait.for': {label: 'Wait', fields: ['duration_sec','until_event']},
-  'condition.if': {label: 'Condition', fields: ['expr']},
-  'ab.split': {label: 'A/B Split', fields: ['ratio_a']},
-  'human.task': {label: 'Human Task', fields: ['assignee_id','due_in_min','notes']},
-  'webhook.http': {label: 'Webhook', fields: ['url','method','headers','body']},
-  'crm.sync': {label: 'CRM Sync', fields: ['target','mapping']},
-  'field.update': {label: 'Update Field', fields: ['path','value']},
-  'throttle': {label: 'Throttle', fields: ['max_per_hour']},
-  'office.hours': {label: 'Office Hours', fields: ['tz','from','to','days']},
+export const NODE_LIBRARY: Record<NodeType, { label: string; description: string }> = {
+  'email.send': { label: 'Email', description: 'Send an email via provider with template tokens.' },
+  'sms.send': { label: 'SMS', description: 'Send an SMS with optional shortlink to report.' },
+  'voice.call': { label: 'Voice call', description: 'Place a call (AI/handoff).' },
+  'wait.for': { label: 'Wait', description: 'Wait for a duration or until an event happens.' },
+  'condition.if': { label: 'Condition', description: 'Branch on lead fields or prior events.' },
+  'ab.split': { label: 'A/B split', description: 'Randomized split for experiments.' },
+  'human.task': { label: 'Human task', description: 'Create a task for a rep to complete.' },
+  'webhook.http': { label: 'Webhook', description: 'Call external HTTP endpoint.' },
+  'crm.sync': { label: 'CRM sync', description: 'Sync to JobNimbus/AccuLynx/HubSpot.' },
+  'field.update': { label: 'Update field', description: 'Update a field on the lead.' },
+  'throttle': { label: 'Throttle', description: 'Control send rates.' },
+  'office.hours': { label: 'Office hours', description: 'Respect local business hours.' },
 };

@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
+import toast from 'react-hot-toast';
 import {
   Camera,
   Check,
@@ -55,16 +56,49 @@ const WalletRewardsModal = ({
   onExchangePoints,
   onOpenLedger,
   isDarkMode,
+  promotions = [],
+  selectedPromotion = null,
+  onSelectPromotion,
+  onLockPromotion,
+  currentTimestamp = Date.now(),
+  recommendedAmount = 250,
 }) => {
   const [activeTab, setActiveTab] = useState(defaultTab);
   const [customAmount, setCustomAmount] = useState('');
   const [presetAmount, setPresetAmount] = useState(100);
   const [plannedUnits, setPlannedUnits] = useState({});
   const [pointConversions, setPointConversions] = useState({});
+  const [lockingPromotionId, setLockingPromotionId] = useState(null);
   const resolvedIsDark =
     typeof isDarkMode === 'boolean'
       ? isDarkMode
       : typeof document !== 'undefined' && document.documentElement.classList.contains('dark');
+  const safePromotions = useMemo(() => (Array.isArray(promotions) ? promotions : []), [promotions]);
+  const activePromotions = useMemo(
+    () => safePromotions.filter((promo) => promo.status === 'active'),
+    [safePromotions]
+  );
+  const selectedPromotionId = selectedPromotion?.id ?? null;
+  const formatCountdown = (expiresAt) => {
+    if (!expiresAt) return 'Limited time';
+    const expires = new Date(expiresAt).getTime();
+    if (Number.isNaN(expires)) return 'Limited time';
+    const diff = expires - currentTimestamp;
+    if (diff <= 0) return 'Expires soon';
+    const minutes = Math.floor(diff / 60000);
+    const seconds = Math.floor((diff % 60000) / 1000);
+    const hours = Math.floor(minutes / 60);
+    const remainingMinutes = minutes % 60;
+    if (hours >= 24) {
+      const days = Math.floor(hours / 24);
+      const remainingHours = hours % 24;
+      return `${days}d ${remainingHours}h remaining`;
+    }
+    if (hours >= 1) {
+      return `${hours}h ${remainingMinutes}m remaining`;
+    }
+    return `${minutes}m ${seconds.toString().padStart(2, '0')}s remaining`;
+  };
   const overlayClasses = resolvedIsDark ? 'bg-slate-950/85' : 'bg-slate-900/30';
   const containerClasses = resolvedIsDark
     ? 'bg-gradient-to-br from-slate-950 via-slate-900 to-slate-950 border border-blue-500/20 text-slate-100'
@@ -93,6 +127,19 @@ const WalletRewardsModal = ({
       setPointConversions({});
     }
   }, [open]);
+
+  useEffect(() => {
+    if (open) {
+      setPresetAmount(recommendedAmount);
+    }
+  }, [open, recommendedAmount]);
+
+  useEffect(() => {
+    if (!selectedPromotion || !safePromotions.length) return;
+    if (!safePromotions.some((promo) => promo.id === selectedPromotion.id)) {
+      onSelectPromotion?.(null);
+    }
+  }, [safePromotions, selectedPromotion, onSelectPromotion]);
 
   const PREMIUM_GUIDES = useMemo(
     () => [
@@ -208,9 +255,31 @@ const WalletRewardsModal = ({
   const handleTopUp = () => {
     const amount = customAmount !== '' ? Number(customAmount) : presetAmount;
     if (!Number.isFinite(amount) || amount <= 0) return;
-    onStripeTopUp?.(amount);
+    if (selectedPromotion) {
+      onStripeTopUp?.(amount, { promotion: selectedPromotion });
+    } else {
+      onStripeTopUp?.(amount);
+    }
     setCustomAmount('');
     setPresetAmount(amount);
+  };
+
+  const handleApplyPromotion = async (promo) => {
+    if (!promo) return;
+    const suggestedAmount = Number(promo?.metadata?.recommended_amount ?? recommendedAmount) || recommendedAmount;
+    setLockingPromotionId(promo.id);
+    try {
+      if (onLockPromotion) {
+        await onLockPromotion(promo, suggestedAmount);
+      }
+      onSelectPromotion?.(promo);
+      setCustomAmount('');
+      setPresetAmount(suggestedAmount);
+    } catch (error) {
+      /* handled upstream */
+    } finally {
+      setLockingPromotionId(null);
+    }
   };
 
   const dailyRewardsHeader = (
@@ -323,6 +392,131 @@ const WalletRewardsModal = ({
         <div className="px-6 pb-6 overflow-y-auto space-y-8 max-h-[75vh] custom-scrollbar">
           {activeTab === 'wallet' && (
             <div className="space-y-8">
+              {activePromotions.length > 0 && (
+                <section className="space-y-4">
+                  <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3">
+                    <div>
+                      <h3 className={`text-sm font-semibold uppercase tracking-wide ${panelHeadingClass}`}>
+                        Limited-time wallet boost
+                      </h3>
+                      <p className={`text-sm ${subtleTextClass}`}>
+                        Double every reload before the countdown expires. Apply the reward and head straight to checkout.
+                      </p>
+                    </div>
+                    <span
+                      className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-full text-[11px] font-semibold ${
+                        resolvedIsDark ? 'bg-emerald-500/20 text-emerald-200 border border-emerald-500/40' : 'bg-emerald-100 text-emerald-700 border border-emerald-200'
+                      }`}
+                    >
+                      <Sparkles className="w-3 h-3" />
+                      Fast-acting reward
+                    </span>
+                  </div>
+                  <div className="grid gap-3">
+                    {activePromotions.map((promo) => {
+                      const isSelected = selectedPromotionId === promo.id;
+                      const countdownLabel = formatCountdown(promo.expires_at);
+                      const urgent = new Date(promo.expires_at || 0).getTime() - currentTimestamp < 5 * 60 * 1000;
+                      const isPendingCheckout = promo.status === 'pending_checkout';
+                      const buttonDisabled = lockingPromotionId === promo.id || isPendingCheckout;
+                      return (
+                        <div
+                          key={promo.id}
+                          className={`rounded-3xl border px-5 py-4 transition ${
+                            resolvedIsDark
+                              ? isSelected
+                                ? 'border-emerald-400/60 bg-emerald-500/10 shadow-lg shadow-emerald-500/20'
+                                : 'border-slate-700 bg-slate-900/70'
+                              : isSelected
+                              ? 'border-emerald-400 bg-emerald-50 shadow-md shadow-emerald-100'
+                              : 'border-slate-200 bg-white'
+                          }`}
+                        >
+                          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
+                            <div className="flex items-center gap-3">
+                              <span
+                                className={`inline-flex items-center justify-center w-9 h-9 rounded-full ${
+                                  resolvedIsDark ? 'bg-emerald-500/15 text-emerald-200' : 'bg-emerald-100 text-emerald-600'
+                                }`}
+                              >
+                                <Gift className="w-4 h-4" />
+                              </span>
+                              <div>
+                                <p className="text-sm font-semibold">2× wallet credits</p>
+                                <p className={`text-xs ${resolvedIsDark ? 'text-slate-300' : 'text-slate-600'}`}>
+                                  Use code <span className="font-mono font-semibold">{promo.code}</span> at checkout.
+                                </p>
+                              </div>
+                            </div>
+                            <span
+                              className={`inline-flex items-center gap-2 px-3 py-1 rounded-full text-[11px] font-semibold ${
+                                urgent
+                                  ? resolvedIsDark
+                                    ? 'bg-rose-500/20 text-rose-200 border border-rose-500/40'
+                                    : 'bg-rose-100 text-rose-600 border border-rose-200'
+                                  : resolvedIsDark
+                                  ? 'bg-blue-500/20 text-blue-200 border border-blue-500/40'
+                                  : 'bg-blue-100 text-blue-700 border border-blue-200'
+                              }`}
+                            >
+                              <RefreshCw className="w-3 h-3" />
+                              {countdownLabel}
+                            </span>
+                          </div>
+                          <div className="mt-3 flex flex-wrap items-center gap-3">
+                            <button
+                              type="button"
+                              onClick={() => handleApplyPromotion(promo)}
+                              disabled={buttonDisabled}
+                              className={`inline-flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-semibold transition ${
+                                resolvedIsDark
+                                  ? isSelected
+                                    ? 'bg-emerald-500 text-slate-950 hover:bg-emerald-400'
+                                    : 'bg-emerald-500/20 text-emerald-100 hover:bg-emerald-500/30'
+                                  : isSelected
+                                  ? 'bg-emerald-600 text-white hover:bg-emerald-500'
+                                  : 'bg-emerald-100 text-emerald-700 hover:bg-emerald-200'
+                              }`}
+                            >
+                              {lockingPromotionId === promo.id
+                                ? 'Applying...'
+                                : isPendingCheckout && isSelected
+                                ? 'Checkout pending'
+                                : isSelected
+                                ? 'Promotion applied'
+                                : 'Apply & reload'}
+                            </button>
+                            <button
+                              type="button"
+                              onClick={async () => {
+                                try {
+                                  if (navigator?.clipboard?.writeText) {
+                                    await navigator.clipboard.writeText(promo.code);
+                                    toast.success('Promotion code copied');
+                                  }
+                                } catch (error) {
+                                  console.warn('Failed to copy promotion code', error);
+                                }
+                              }}
+                              className={`text-xs font-semibold px-3 py-1.5 rounded-lg underline-offset-2 ${
+                                resolvedIsDark ? 'text-slate-300 hover:text-white hover:bg-slate-800' : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
+                              }`}
+                            >
+                              Copy code
+                            </button>
+                            {isSelected && (
+                              <span className={`text-xs font-semibold ${resolvedIsDark ? 'text-emerald-200' : 'text-emerald-600'}`}>
+                                Any reload amount applies instantly.
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </section>
+              )}
+
               <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-6">
                 <SummaryBadge
                   isDark={resolvedIsDark}
@@ -366,6 +560,8 @@ const WalletRewardsModal = ({
                 onCustomAmountChange={setCustomAmount}
                 onSubmitStripe={handleTopUp}
                 planOptions={PLAN_OPTIONS}
+                selectedPromotion={selectedPromotion}
+                recommendedAmount={recommendedAmount}
               />
 
               <section className="space-y-6">
@@ -743,12 +939,23 @@ const WalletTopUpStrip = ({
   onCustomAmountChange,
   onSubmitStripe,
   planOptions = [],
+  selectedPromotion,
+  recommendedAmount,
 }) => {
+  const popularAmount = 1100;
+  const presetAmounts = [100, 250, 500, 750, popularAmount];
   const parsedCustom = Number(customAmount);
   const selectedAmount =
     customAmount !== '' && Number.isFinite(parsedCustom) && parsedCustom > 0 ? parsedCustom : Number(presetAmount);
   const estimatedReloadLeads =
     Number.isFinite(selectedAmount) && selectedAmount > 0 ? Math.max(1, Math.floor(selectedAmount / RETAIL_LEAD_COST)) : 0;
+  const boostedValue =
+    selectedPromotion && Number.isFinite(selectedAmount) && selectedAmount > 0
+      ? selectedAmount * (selectedPromotion.multiplier || 2)
+      : null;
+  const formattedSelectedAmount = Number.isFinite(selectedAmount)
+    ? selectedAmount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+    : '0.00';
   const primaryPlan = planOptions[0];
   const primaryPlanLeads = primaryPlan?.planLeads ?? 0;
   const primaryPlanName = primaryPlan?.name ?? 'Growth Builder';
@@ -782,32 +989,109 @@ const WalletTopUpStrip = ({
         </div>
       </div>
 
-      <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-5 gap-4">
-      {[100, 250, 500, 750, 1000].map((amount) => {
-        const isActive = customAmount === '' && presetAmount === amount;
-        return (
-          <button
-            key={`preset-${amount}`}
-            type="button"
-            onClick={() => {
-              onPresetChange(amount);
-              onCustomAmountChange('');
-            }}
-            className={`rounded-2xl border px-4 py-3 text-lg font-semibold transition ${
-              isActive
-                ? isDark
-                  ? 'border-blue-300 bg-blue-500/20 text-blue-100 shadow shadow-blue-900/30'
-                  : 'border-blue-500 bg-blue-50 text-blue-700 shadow-sm'
-                : isDark
-                ? 'border-slate-700 bg-slate-900/70 text-slate-200 hover:border-blue-400'
-                : 'border-slate-200 bg-white text-slate-700 hover:border-blue-400'
+      {selectedPromotion && (
+        <div className="space-y-3">
+          <div className="flex justify-center">
+            <div
+              className={`inline-flex items-center gap-2 rounded-full px-4 py-1.5 text-xs font-semibold tracking-wide uppercase ${
+                isDark ? 'bg-emerald-400/20 text-emerald-100 border border-emerald-300/40' : 'bg-emerald-500 text-white shadow-sm'
+              }`}
+            >
+              Save 2× with promo code:
+              <button
+                type="button"
+                onClick={async () => {
+                  try {
+                    await navigator.clipboard.writeText(selectedPromotion.code);
+                    toast.success('Promo code copied');
+                  } catch (error) {
+                    console.warn('copy promo code failed', error);
+                  }
+                }}
+                className={`font-mono text-sm font-bold px-2 py-0.5 rounded ${
+                  isDark ? 'bg-emerald-500/30 text-emerald-100' : 'bg-white/20 text-white'
+                }`}
+              >
+                {selectedPromotion.code}
+              </button>
+            </div>
+          </div>
+          <div
+            className={`rounded-2xl border px-4 py-3 flex items-center gap-3 ${
+              isDark ? 'border-emerald-400/40 bg-emerald-500/10 text-emerald-100' : 'border-emerald-200 bg-emerald-50 text-emerald-700'
             }`}
           >
-            ${amount}
-          </button>
-        );
-      })}
-    </div>
+            <span
+              className={`inline-flex items-center justify-center w-9 h-9 rounded-full ${
+                isDark ? 'bg-emerald-400/20 text-emerald-100' : 'bg-emerald-100 text-emerald-600'
+              }`}
+            >
+              <Gift className="w-4 h-4" />
+            </span>
+            <div>
+              <p className="text-sm font-semibold">Double credits ready</p>
+              <p className="text-xs">
+                Any reload during this window is boosted automatically. Recommended amount:{' '}
+                <span className="font-semibold">${Number(recommendedAmount || 0).toLocaleString()}</span>.
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
+
+      <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-5 gap-4">
+        {presetAmounts.map((amount) => {
+          const isActive = customAmount === '' && presetAmount === amount;
+          const isRecommended = amount === recommendedAmount;
+          const isPopular = amount === popularAmount;
+          const highlightPopular = isPopular && (presetAmount === 100 || isActive);
+          return (
+            <button
+              key={`preset-${amount}`}
+              type="button"
+              onClick={() => {
+                onPresetChange(amount);
+                onCustomAmountChange('');
+              }}
+              className={`relative rounded-2xl border px-5 py-2.5 text-lg font-semibold transition ${
+                isActive
+                  ? isDark
+                    ? isPopular
+                      ? 'border-emerald-300 bg-emerald-500/20 text-emerald-100 shadow shadow-emerald-900/30'
+                      : 'border-blue-300 bg-blue-500/20 text-blue-100 shadow shadow-blue-900/30'
+                    : isPopular
+                    ? 'border-emerald-500 bg-emerald-50 text-emerald-700 shadow-sm'
+                    : 'border-blue-500 bg-blue-50 text-blue-700 shadow-sm'
+                  : isRecommended
+                  ? isDark
+                    ? 'border-blue-400/60 bg-slate-900/70 text-blue-200 hover:border-blue-300'
+                    : 'border-blue-400 bg-blue-50 text-blue-700 hover:border-blue-300'
+                  : isDark
+                  ? 'border-slate-700 bg-slate-900/70 text-slate-200 hover:border-blue-400'
+                  : 'border-slate-200 bg-white text-slate-700 hover:border-blue-400'
+              }`}
+            >
+              {isPopular && (
+                <span
+                  className={`absolute -top-3 right-3 inline-flex items-center gap-1 rounded-full px-3 py-0.5 text-[10px] font-semibold ${
+                    highlightPopular
+                      ? isDark
+                        ? 'bg-emerald-400 text-slate-900 shadow shadow-emerald-900/40'
+                        : 'bg-emerald-500 text-white shadow-sm'
+                      : isDark
+                      ? 'bg-slate-700 text-emerald-200 border border-emerald-300/40'
+                      : 'bg-slate-800 text-emerald-200 border border-emerald-300/40'
+                  }`}
+                >
+                  <Sparkles className="w-3 h-3" />
+                  Popular
+                </span>
+              )}
+              ${amount}
+            </button>
+          );
+        })}
+      </div>
 
       <div
         className={`rounded-2xl border p-5 space-y-3 ${
@@ -848,15 +1132,15 @@ const WalletTopUpStrip = ({
           isDark ? 'border-slate-700 bg-slate-900/60 text-slate-200' : 'border-slate-200 bg-slate-50 text-slate-700'
         }`}
       >
-      <p className="text-sm font-semibold">
-        This reload ≈ <span className="text-blue-500">{estimatedReloadLeads > 0 ? `${estimatedReloadLeads.toLocaleString()} qualified leads` : '—'}</span> using a la carte credits.
-      </p>
-      {primaryPlanLeads > 0 && (
-        <p className="text-xs leading-relaxed mt-1">
-          {primaryPlanName} delivers ≈ {primaryPlanLeads.toLocaleString()} leads each month ({primaryPlanMultiplierLabel} wallet value)
-          {leadGain > 0 && estimatedReloadLeads > 0 ? ` — about ${leadGain.toLocaleString()} more than this single reload.` : ''} Backed by our 30-day guarantee.
+        <p className="text-sm font-semibold">
+          This reload ≈ <span className="text-blue-500">{estimatedReloadLeads > 0 ? `${estimatedReloadLeads.toLocaleString()} qualified leads` : '—'}</span> using a la carte credits.
         </p>
-      )}
+        {primaryPlanLeads > 0 && (
+          <p className="text-xs leading-relaxed mt-1">
+            {primaryPlanName} delivers ≈ {primaryPlanLeads.toLocaleString()} leads each month ({primaryPlanMultiplierLabel} wallet value)
+            {leadGain > 0 && estimatedReloadLeads > 0 ? ` — about ${leadGain.toLocaleString()} more than this single reload.` : ''} Backed by our 30-day guarantee.
+          </p>
+        )}
       </div>
 
       <div
@@ -869,12 +1153,23 @@ const WalletTopUpStrip = ({
         onClick={onSubmitStripe}
         className="flex w-full items-center justify-between rounded-xl px-4 py-3 text-white font-semibold shadow-sm transition bg-[#635bff] hover:bg-[#4a44d4]"
       >
-        <span className="text-base">Proceed to Stripe checkout</span>
+        <span className="text-base">
+          {selectedPromotion ? 'Proceed to Stripe checkout (2× boost)' : 'Proceed to Stripe checkout'}
+        </span>
         <Sparkles className="w-4 h-4" />
       </button>
       <p className={`text-xs leading-relaxed ${isDark ? 'text-slate-300' : 'text-slate-600'}`}>
         Charges post to your Stripe customer account and wallet balances update immediately after confirmation.
       </p>
+      {selectedPromotion && Number.isFinite(selectedAmount) && selectedAmount > 0 && (
+        <p className={`text-xs font-semibold ${isDark ? 'text-emerald-200' : 'text-emerald-600'}`}>
+          Reload ${formattedSelectedAmount} → credits ${
+            boostedValue
+              ? boostedValue.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+              : (selectedAmount * (selectedPromotion.multiplier || 2)).toLocaleString()
+          } after payment.
+        </p>
+      )}
       <span
         className={`inline-flex items-center gap-2 text-[11px] font-semibold ${
           isDark ? 'text-blue-200' : 'text-blue-600'

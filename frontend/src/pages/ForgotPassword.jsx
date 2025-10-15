@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link } from 'react-router-dom';
 import { useSEO } from '../utils/seo';
 
 export default function ForgotPassword() {
@@ -7,7 +7,6 @@ export default function ForgotPassword() {
   const [submitted, setSubmitted] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
-  const navigate = useNavigate();
 
   useSEO({
     title: 'Reset your password — Fish Mouth',
@@ -97,7 +96,6 @@ export default function ForgotPassword() {
     </div>
   );
 }
-
 
 
 

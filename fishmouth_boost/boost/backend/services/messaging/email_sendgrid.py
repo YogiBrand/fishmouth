@@ -1,12 +1,35 @@
-# boost/backend/services/messaging/email_sendgrid.py
-from typing import List, Dict, Any, Optional
+import os, json
+from typing import Dict, Any, Optional
 
-class SendGridEmailProvider:
-    def __init__(self, api_key: str, dry_run: bool = False):
-        self.api_key = api_key; self.dry_run = dry_run
-    def send(self, to: List[str], subject: str, html: Optional[str]=None, text: Optional[str]=None,
-             attachments: Optional[List[Dict[str, Any]]]=None, categories: Optional[List[str]]=None) -> Dict[str, Any]:
-        payload = {"to":to,"subject":subject,"html":html,"text":text,"attachments":attachments or [],"categories":categories or []}
-        if self.dry_run: return {"provider":"sendgrid","status":"queued","id":"dryrun","payload":payload}
-        # TODO: real API call
-        return {"provider":"sendgrid","status":"queued","id":"mock123","payload":payload}
+SENDGRID_ENABLED = os.environ.get("SENDGRID_ENABLED", "false").lower() == "true"
+SENDGRID_API_KEY = os.environ.get("SENDGRID_API_KEY")
+
+def send_email_sendgrid(to_email: str, subject: str, html: str, *, attachments: Optional[list] = None) -> Dict[str, Any]:
+    """Send an email via SendGrid.
+    - Dry-run if SENDGRID_ENABLED is false or API key missing.
+    - Returns a dict with a `provider_id` (mocked in dry-run).
+    """
+    if not SENDGRID_ENABLED or not SENDGRID_API_KEY:
+        return {"status": "dry_run", "provider": "sendgrid", "provider_id": "dryrun-" + to_email}
+
+    try:
+        import requests
+        payload = {
+            "personalizations": [{"to": [{"email": to_email}]}],
+            "from": {"email": os.environ.get("SENDGRID_FROM_EMAIL", "noreply@example.com")},
+            "subject": subject,
+            "content": [{"type": "text/html", "value": html}],
+        }
+        if attachments:
+            payload["attachments"] = attachments
+        resp = requests.post(
+            "https://api.sendgrid.com/v3/mail/send",
+            headers={"Authorization": f"Bearer {SENDGRID_API_KEY}", "Content-Type": "application/json"},
+            data=json.dumps(payload),
+            timeout=10,
+        )
+        if resp.status_code in (200, 202):
+            return {"status": "sent", "provider": "sendgrid", "provider_id": resp.headers.get("X-Message-Id", "unknown")}
+        return {"status": "error", "provider": "sendgrid", "error": resp.text}
+    except Exception as e:
+        return {"status": "error", "provider": "sendgrid", "error": str(e)}

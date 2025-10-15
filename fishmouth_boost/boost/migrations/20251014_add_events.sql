@@ -10,5 +10,5 @@ create table if not exists events (
   request_id text,
   created_at timestamptz not null default now()
 );
-create index if not exists events_created_idx on events(created_at);
-create index if not exists events_type_idx on events(type);
+create index if not exists idx_events_created_at on events (created_at);
+create index if not exists idx_events_type on events (type);

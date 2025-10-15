@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Optional
+from typing import Any, Dict, Optional
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
@@ -22,6 +22,10 @@ class TemplatePayload(BaseModel):
 class TemplatePreviewData(BaseModel):
     lead_id: Optional[str] = Field(None, description="Lead identifier for token context")
     report_id: Optional[str] = Field(None, description="Report identifier for token context")
+    context: Optional[Dict[str, Any]] = Field(
+        default=None,
+        description="Explicit token context override {lead:{}, company:{}, ...}",
+    )
 
 
 class TemplatePreviewRequest(BaseModel):
@@ -64,18 +68,6 @@ async def _save_template(template_id: str, payload: TemplatePayload):
         await db.close()
 
 
-@router.post("/{template_id}")
-async def create_template(template_id: str, payload: TemplatePayload):
-    record = await _save_template(template_id, payload)
-    return record
-
-
-@router.put("/{template_id}")
-async def update_template(template_id: str, payload: TemplatePayload):
-    record = await _save_template(template_id, payload)
-    return record
-
-
 @router.post("/preview")
 async def preview_template(payload: TemplatePreviewRequest):
     db = await get_db()
@@ -86,6 +78,7 @@ async def preview_template(payload: TemplatePreviewRequest):
                 template_id=payload.template_id,
                 lead_id=payload.data.lead_id,
                 report_id=payload.data.report_id,
+                context_override=payload.data.context,
             )
         except ValueError as exc:
             status = 404 if "not found" in str(exc).lower() else 400
@@ -93,3 +86,15 @@ async def preview_template(payload: TemplatePreviewRequest):
         return result
     finally:
         await db.close()
+
+
+@router.post("/{template_id}")
+async def create_template(template_id: str, payload: TemplatePayload):
+    record = await _save_template(template_id, payload)
+    return record
+
+
+@router.put("/{template_id}")
+async def update_template(template_id: str, payload: TemplatePayload):
+    record = await _save_template(template_id, payload)
+    return record

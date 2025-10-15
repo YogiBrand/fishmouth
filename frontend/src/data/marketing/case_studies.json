@@ -1,0 +1,25 @@
+[
+  {
+    "slug": "neighborhood-hail-response",
+    "title": "Neighborhood hail response \u2192 31 installs in 45 days",
+    "market": "North Texas",
+    "summary": "HOT list + shareable reports + SMS nudges led to 31 installs and $620k booked revenue.",
+    "image": "/marketing/case-studies/cs1.jpg",
+    "metrics": {
+      "installs": 31,
+      "revenue": 620000,
+      "avg_days_to_close": 12
+    }
+  },
+  {
+    "slug": "tile-underlayment-phx",
+    "title": "Tile underlayment in Phoenix \u2192 14 approvals",
+    "market": "Phoenix, AZ",
+    "summary": "UV heat map overlays + door routes converted tile inspections to approvals.",
+    "image": "/marketing/case-studies/cs2.jpg",
+    "metrics": {
+      "approvals": 14,
+      "avg_ticket": 18500
+    }
+  }
+]

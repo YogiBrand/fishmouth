@@ -1,0 +1,26 @@
+[
+  {
+    "company": "North Ridge Roofing",
+    "location": "Fort Collins, CO",
+    "quote": "We booked 9 appointments in the first week. The reports made homeowners say yes on the spot.",
+    "name": "Tyler M.",
+    "role": "Owner",
+    "logo": "/marketing/logos/logo1.svg"
+  },
+  {
+    "company": "Gulf Coast Exteriors",
+    "location": "Tampa, FL",
+    "quote": "Finally, leads that answer. The insurance-friendly report and auto follow-ups do the heavy lifting.",
+    "name": "Ana S.",
+    "role": "General Manager",
+    "logo": "/marketing/logos/logo2.svg"
+  },
+  {
+    "company": "Desert Sun Roofing",
+    "location": "Phoenix, AZ",
+    "quote": "The UV damage overlays and before/after pics help close faster. Worth it.",
+    "name": "Luis R.",
+    "role": "Sales Lead",
+    "logo": "/marketing/logos/logo3.svg"
+  }
+]

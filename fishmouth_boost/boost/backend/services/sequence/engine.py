@@ -1,14 +1,25 @@
-# boost/backend/services/sequence/engine.py
-from typing import Dict, Any
+from __future__ import annotations
 import time
+from typing import Dict, Any, List, Optional
+
 class SequenceEngine:
-    def __init__(self, outbox_sender): self.send = outbox_sender
-    def run_step(self, enrollment: Dict[str, Any], step: Dict[str, Any]) -> Dict[str, Any]:
-        t = step.get("type")
-        if t == "wait.for":
-            time.sleep(0.01); return {"status":"scheduled","resume_in": step.get("duration_sec",60)}
-        if t == "email.send": return self.send(channel="email", payload=step.get("payload",{}))
-        if t == "sms.send": return self.send(channel="sms", payload=step.get("payload",{}))
-        if t == "condition.if":
-            expr = step.get("expr", True); return {"status":"routed","branch": "then" if expr else "else"}
-        return {"status":"noop"}
+    """Minimal in-process engine for dev; replace with Celery in production."""
+    def __init__(self):
+        self.enrollments: Dict[str, Dict[str, Any]] = {}
+
+    def enroll(self, enrollment_id: str, workflow: Dict[str, Any], context: Dict[str, Any]):
+        self.enrollments[enrollment_id] = {"workflow": workflow, "context": context, "step": 0, "status": "active"}
+
+    def step(self, enrollment_id: str):
+        state = self.enrollments.get(enrollment_id)
+        if not state or state["status"] != "active":
+            return {"status": "noop"}
+        steps: List[Dict[str, Any]] = state["workflow"].get("steps", [])
+        i = state["step"]
+        if i >= len(steps):
+            state["status"] = "completed"
+            return {"status": "completed"}
+        step = steps[i]
+        # For dev: just record the step type and advance
+        state["step"] += 1
+        return {"status": "advanced", "executed": step.get("type")}

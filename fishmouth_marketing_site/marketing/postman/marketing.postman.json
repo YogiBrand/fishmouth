@@ -1,0 +1,67 @@
+{
+  "info": {
+    "name": "Fish Mouth Marketing",
+    "_postman_id": "1af15e66-03e6-49f6-8a57-3408fc124bcd",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "item": [
+    {
+      "name": "Claim Free Leads",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": {
+          "raw": "{{baseUrl}}/api/v1/marketing/claim_free_leads",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "api",
+            "v1",
+            "marketing",
+            "claim_free_leads"
+          ]
+        },
+        "body": {
+          "mode": "raw",
+          "raw": "{\"name\": \"Sam\", \"email\": \"sam@example.com\", \"phone\": \"+15551234567\", \"company\": \"Sam Roofing\", \"city\": \"Austin\", \"state\": \"TX\", \"source\": \"homepage\"}"
+        }
+      }
+    },
+    {
+      "name": "Geo Guess",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "X-Client-Timezone",
+            "value": "America/Chicago"
+          }
+        ],
+        "url": {
+          "raw": "{{baseUrl}}/api/v1/geo/guess",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "api",
+            "v1",
+            "geo",
+            "guess"
+          ]
+        }
+      }
+    }
+  ],
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "http://localhost:8000"
+    }
+  ]
+}

@@ -100,7 +100,8 @@ class DatabaseSession:
 
     def __del__(self) -> None:
         try:
-            self.close()
+            if not self._closed:
+                self._session.close()
         except Exception:
             # Avoid noisy errors during interpreter shutdown
             pass

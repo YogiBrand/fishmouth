@@ -319,6 +319,57 @@ services:
       retries: 3
       start_period: 20s
 
+  # Community Street Imagery Service (FREE-FIRST)
+  street-imagery:
+    build:
+      context: ./services/street-imagery
+      dockerfile: Dockerfile
+    container_name: fishmouth_street_imagery
+    environment:
+      MAPILLARY_TOKEN: ${MAPILLARY_TOKEN:-}
+      OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
+      OPENROUTER_BASE_URL: ${OPENROUTER_BASE_URL:-https://openrouter.ai/api/v1}
+      OPENROUTER_VISION_MODEL: ${OPENROUTER_VISION_MODEL:-llava-v1.6-34b}
+    ports:
+      - "8014:8014"
+    depends_on:
+      - redis
+    volumes:
+      - ./services/street-imagery:/app
+    restart: unless-stopped
+    healthcheck:
+      test:
+        - "CMD-SHELL"
+        - "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8014/readyz')\""
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+
+  # Geocoder Service (FREE-FIRST)
+  geocoder-service:
+    build:
+      context: ./services/geocoder-service
+      dockerfile: Dockerfile
+    container_name: fishmouth_geocoder
+    environment:
+      NOMINATIM_BASE: ${NOMINATIM_BASE:-https://nominatim.openstreetmap.org}
+      MAPBOX_TOKEN: ${MAPBOX_TOKEN:-}
+      GEOCODER_USER_AGENT: ${GEOCODER_USER_AGENT:-fishmouth-geocoder/1.0}
+    ports:
+      - "8015:8015"
+    volumes:
+      - ./services/geocoder-service:/app
+    restart: unless-stopped
+    healthcheck:
+      test:
+        - "CMD-SHELL"
+        - "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8015/readyz')\""
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+
   frontend:
     build:
       context: ./frontend

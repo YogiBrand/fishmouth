@@ -32,6 +32,7 @@ from models import (  # type: ignore
     SocialProofData,
     FollowUpTask,
     Template,
+    MarketingSignup,
 )
 
 __all__ = [
@@ -66,4 +67,5 @@ __all__ = [
     "SocialProofData",
     "FollowUpTask",
     "Template",
+    "MarketingSignup",
 ]

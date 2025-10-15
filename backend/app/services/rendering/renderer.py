@@ -6,7 +6,7 @@ import hashlib
 from base64 import b64decode
 from datetime import datetime
 from pathlib import Path
-from typing import Dict
+from typing import Dict, Tuple
 
 
 STATIC_ROOT = Path(__file__).resolve().parents[2] / "static"
@@ -73,3 +73,14 @@ def render_pdf_and_preview(html: str, report_id: str, base_name: str) -> Dict[st
         "pdf_path": str(pdf_path),
         "preview_path": str(png_path),
     }
+
+
+def render_report_html_to_pdf_and_png(report_id: str, html: str) -> Tuple[str, str, str]:
+    """Compatibility wrapper that returns file paths and checksum.
+
+    Returns a tuple of (pdf_path, png_path, checksum).
+    """
+
+    checksum = content_checksum(html)
+    assets = render_pdf_and_preview(html, report_id, checksum[:16])
+    return assets["pdf_path"], assets["preview_path"], checksum

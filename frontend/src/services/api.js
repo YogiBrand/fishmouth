@@ -1,5 +1,13 @@
 import axios from 'axios';
-import { mockLeads, mockDashboardStats, mockRecentScans, mockActivities, mockSequences, mockAnalyticsData } from '../data/mockLeads';
+import {
+  mockLeads,
+  mockDashboardStats,
+  mockRecentScans,
+  mockHeatClusters,
+  mockActivities,
+  mockSequences,
+  mockAnalyticsData,
+} from '../data/mockLeads';
 
 const ENABLE_MOCK_DATA = process.env.REACT_APP_ENABLE_MOCKS === 'true' || process.env.NODE_ENV !== 'production';
 
@@ -382,7 +390,60 @@ export const leadAPI = {
       
       // If no specific leads found, use a subset of all leads with realistic data
       const leadsToUse = scanLeads.length > 0 ? scanLeads : mockLeads.slice(0, 15);
-      
+
+      const normalizedLeads = leadsToUse
+        .map((lead, index) => normalizeMockLead({ id: lead.id ?? index + 1, ...lead }))
+        .filter(Boolean);
+
+      const randomInRange = (min, max, seed) => {
+        const base = Math.sin((seed + 1) * 9301 + 49297) % 233280;
+        const normalized = base / 233280;
+        return parseFloat((min + normalized * (max - min)).toFixed(6));
+      };
+
+      const baseLat = normalizedLeads[0]?.latitude ?? 30.2672;
+      const baseLon = normalizedLeads[0]?.longitude ?? -97.7431;
+      const latSpread = 0.08;
+      const lonSpread = 0.08;
+      const bounds = {
+        minLat: baseLat - latSpread,
+        maxLat: baseLat + latSpread,
+        minLon: baseLon - lonSpread,
+        maxLon: baseLon + lonSpread,
+      };
+
+      const mapPoints = normalizedLeads.map((lead, index) => {
+        const latitude = lead.latitude ?? randomInRange(bounds.minLat, bounds.maxLat, index + (lead.id || 0));
+        const longitude = lead.longitude ?? randomInRange(bounds.minLon, bounds.maxLon, index + 41 + (lead.id || 0));
+        const hydrated = {
+          ...lead,
+          latitude,
+          longitude,
+        };
+        normalizedLeads[index] = hydrated;
+        return {
+          id: hydrated.id,
+          latitude,
+          longitude,
+          lead_score: hydrated.lead_score,
+          priority: hydrated.priority,
+        };
+      });
+
+      const mapCenter = mapPoints.length
+        ? {
+            latitude: mapPoints.reduce((sum, point) => sum + point.latitude, 0) / mapPoints.length,
+            longitude: mapPoints.reduce((sum, point) => sum + point.longitude, 0) / mapPoints.length,
+          }
+        : { latitude: baseLat, longitude: baseLon };
+
+      const costEstimate = {
+        imagery: +(normalizedLeads.length * 2.45).toFixed(2),
+        enrichment: +(normalizedLeads.length * 1.85).toFixed(2),
+        outreach_budget: +(normalizedLeads.length * 12.75).toFixed(2),
+      };
+      costEstimate.total = +(costEstimate.imagery + costEstimate.enrichment + costEstimate.outreach_budget).toFixed(2);
+
       return {
         id: scanId,
         area_name: 'Austin Metro Area',
@@ -427,7 +488,21 @@ export const leadAPI = {
             'flashing_problems': 3
           }
         },
-        leads: leadsToUse,
+        map: {
+          center: mapCenter,
+          bounds,
+          heatmap_points: mapPoints,
+        },
+        insights: {
+          summary: 'High-density hail corridor with 4.7× ROI forecast. Prioritize concierge outreach and insurance-ready scripts.',
+          playbook: [
+            'Launch AI voice + SMS follow-up within 2 hours of scan completion.',
+            'Escalate ultra-hot roofs into premium adjuster track with photo kit.',
+            'Bundle gutter replacements to lift average deal size by 12%.',
+          ],
+        },
+        cost_estimate: costEstimate,
+        leads: normalizedLeads,
         performance_metrics: {
           scan_efficiency: 94.2,
           ai_accuracy_rate: 91.7,
@@ -435,6 +510,177 @@ export const leadAPI = {
           processing_time_per_property: '2.3 seconds',
           total_scan_duration: '2 hours 15 minutes'
         }
+      };
+    }
+  },
+
+  getScanClusters: async (payload = {}) => {
+    try {
+      const response = await api.post('/api/scans/clusters', payload);
+      return response.data;
+    } catch (error) {
+      assertMocksEnabled(error);
+      console.log('Using mock scan cluster insights for development');
+      const limit = Number.isFinite(payload?.limit) ? payload.limit : 25;
+      const clusters = mockHeatClusters
+        .slice(0, limit)
+        .map((cluster, index) => ({
+          id: cluster.id,
+          name: cluster.label,
+          city: cluster.city,
+          state: cluster.state,
+          cluster_score: cluster.cluster_score,
+          cluster_status: cluster.cluster_status || cluster.status,
+          permit_count: cluster.permit_count,
+          active_claims: cluster.active_claims,
+          likely_new_roofs: cluster.likely_new_roofs,
+          radius_miles: cluster.radius_miles,
+          metadata: {
+            hot_leads: cluster.lead_overlap,
+            sample_addresses: cluster.sample_addresses || [],
+            insurance_mix: cluster.insurance_mix,
+          },
+          date_range_start: cluster.last_activity_at,
+          date_range_end: cluster.last_activity_at,
+          avg_permit_value: 26500 + index * 1250,
+        }));
+      return {
+        clusters,
+        area: payload?.area_geojson || null,
+      };
+    }
+  },
+
+  getHeatClusters: async () => {
+    try {
+      const response = await api.get('/api/heat-clusters');
+      return response.data;
+    } catch (error) {
+      assertMocksEnabled(error);
+      console.log('Using mock heat cluster list for development');
+      return mockHeatClusters.map((cluster) => ({
+        id: cluster.id,
+        label: cluster.label,
+        city: cluster.city,
+        state: cluster.state,
+        cluster_score: cluster.cluster_score,
+        cluster_status: cluster.cluster_status || cluster.status,
+        permit_count: cluster.permit_count,
+        likely_new_roofs: cluster.likely_new_roofs,
+        total_properties: cluster.total_properties,
+        scanned_properties: cluster.scanned_properties,
+        predicted_roi_multiple: cluster.predicted_roi_multiple,
+        radius_miles: cluster.radius_miles,
+        last_activity_at: cluster.last_activity_at,
+        associated_scans: cluster.associated_scans,
+      }));
+    }
+  },
+
+  getHeatCluster: async (clusterId) => {
+    try {
+      const response = await api.get(`/api/heat-clusters/${clusterId}`);
+      return response.data;
+    } catch (error) {
+      assertMocksEnabled(error);
+      console.log(`Using mock heat cluster detail for ${clusterId}`);
+      const cluster = mockHeatClusters.find((item) => item.id === clusterId);
+      if (!cluster) {
+        throw error;
+      }
+
+      const leadsForCluster = mockLeads.filter((lead) => {
+        const zip = (lead.zip_code || lead.zip || '').toString();
+        if (cluster.zip_codes?.length) {
+          return cluster.zip_codes.includes(zip);
+        }
+        if (cluster.associated_scans?.length) {
+          return cluster.associated_scans.includes(lead.scan_id);
+        }
+        return false;
+      });
+
+      const normalizedLeads = leadsForCluster.map((lead) => normalizeMockLead(lead)).filter(Boolean);
+
+      const randomInRange = (min, max, seed) => {
+        const base = Math.sin((seed + 1) * 9301 + 49297) % 233280;
+        const normalized = base / 233280;
+        return parseFloat((min + normalized * (max - min)).toFixed(6));
+      };
+
+      const bounds = cluster.bounding_box;
+      const mapPoints = bounds
+        ? normalizedLeads.map((lead, index) => ({
+            id: lead.id,
+            latitude: randomInRange(bounds.minLat, bounds.maxLat, index + (lead.id || 0)),
+            longitude: randomInRange(bounds.minLon, bounds.maxLon, index + 41 + (lead.id || 0)),
+            lead_score: lead.lead_score,
+            priority: lead.priority,
+          }))
+        : [];
+
+      const costEstimate = {
+        imagery: +(cluster.scanned_properties * 0.42).toFixed(2),
+        enrichment: +(cluster.scanned_properties * 0.24).toFixed(2),
+        outreach_budget: +(normalizedLeads.length * 12.75).toFixed(2),
+      };
+      costEstimate.total = +(costEstimate.imagery + costEstimate.enrichment + costEstimate.outreach_budget).toFixed(2);
+
+      return {
+        id: cluster.id,
+        label: cluster.label,
+        city: cluster.city,
+        state: cluster.state,
+        cluster_score: cluster.cluster_score,
+        cluster_status: cluster.cluster_status || cluster.status,
+        summary: {
+          permit_count: cluster.permit_count,
+          likely_new_roofs: cluster.likely_new_roofs,
+          active_claims: cluster.active_claims,
+          predicted_roi_multiple: cluster.predicted_roi_multiple,
+          total_properties: cluster.total_properties,
+          scanned_properties: cluster.scanned_properties,
+          coverage_ratio: cluster.total_properties
+            ? +(cluster.scanned_properties / cluster.total_properties).toFixed(2)
+            : null,
+          lead_overlap: cluster.lead_overlap,
+          associated_scans: cluster.associated_scans,
+        },
+        cost_estimate: costEstimate,
+        insurance_mix: cluster.insurance_mix,
+        ai_takeaway: cluster.ai_takeaway,
+        last_activity_at: cluster.last_activity_at,
+        map: {
+          center: cluster.map_center,
+          bounds: cluster.bounding_box,
+          heatmap_points: mapPoints,
+        },
+        leads: normalizedLeads,
+        insights: {
+          trend: cluster.status,
+          recommendations: [
+            cluster.ai_takeaway,
+            'Bundle high-score roofs into premium SMS + voice sequence for rapid coverage.',
+            'Coordinate canvassing crews with AI heatmap to close gaps in the polygon.',
+          ],
+        },
+        timeline: [
+          {
+            label: 'Permits filed',
+            value: cluster.permit_count,
+            occurred_at: cluster.last_activity_at,
+          },
+          {
+            label: 'Drone inspections queued',
+            value: Math.round(cluster.scanned_properties * 0.28),
+            occurred_at: new Date(Date.now() - 2 * 24 * 60 * 60 * 1000).toISOString(),
+          },
+          {
+            label: 'Insurance claims',
+            value: cluster.active_claims,
+            occurred_at: new Date(Date.now() - 5 * 24 * 60 * 60 * 1000).toISOString(),
+          },
+        ],
       };
     }
   },
@@ -701,6 +947,103 @@ export const sequenceAPI = {
   processPending: async () => {
     const response = await api.post('/api/sequences/process');
     return response.data;
+  },
+  getAnalytics: async (sequenceId, params = {}) => {
+    try {
+      const response = await api.get(`/api/sequences/${sequenceId}/analytics`, {
+        params,
+      });
+      return response.data;
+    } catch (error) {
+      assertMocksEnabled(error);
+      const {
+        timeframe = '30d',
+        status = '',
+        channel = '',
+        step = '',
+        search = '',
+        limit = params.limit || 50,
+        offset = params.offset || 0,
+      } = params;
+      return {
+        sequence: {
+          id: sequenceId,
+          name: 'Mock Sequence Insights',
+          description: 'Mock analytics data',
+          is_active: true,
+        },
+        filters: {
+          timeframe,
+          applied: { step, status, channel, search },
+          options: {
+            steps: [],
+            channels: [],
+            statuses: ['engaged', 'responded', 'delivered', 'queued', 'failed', 'sent', 'completed'],
+          },
+        },
+        summary: {
+          enrollment: {
+            total: 0,
+            active: 0,
+            paused: 0,
+            completed: 0,
+            failed: 0,
+            converted: 0,
+            conversion_rate: 0,
+            completion_rate: 0,
+            emails_sent: 0,
+            sms_sent: 0,
+            calls_made: 0,
+          },
+          delivery: {
+            messages: 0,
+            delivered: 0,
+            failed: 0,
+            queued: 0,
+            engaged: 0,
+            clicked: 0,
+            opened: 0,
+            replied: 0,
+            unique_leads: 0,
+            average_response_minutes: null,
+            engagement_rate: 0,
+            delivery_rate: 0,
+            failure_rate: 0,
+          },
+          overall_delivery: {
+            messages: 0,
+            delivered: 0,
+            failed: 0,
+            queued: 0,
+            engaged: 0,
+            clicked: 0,
+            opened: 0,
+            replied: 0,
+            unique_leads: 0,
+            average_response_minutes: null,
+            engagement_rate: 0,
+            delivery_rate: 0,
+            failure_rate: 0,
+          },
+          channels: {
+            filtered: { counts: {}, distribution: {} },
+            overall: { counts: {}, distribution: {} },
+          },
+        },
+        automation_health: [],
+        steps: {
+          filtered: [],
+          overall: [],
+        },
+        engagements: {
+          total: 0,
+          count: 0,
+          limit,
+          offset,
+          items: [],
+        },
+      };
+    }
   },
   updateEnrollment: async (enrollmentId, action, notes = '') => {
     const response = await api.put(`/api/sequences/enrollments/${enrollmentId}`, {
@@ -1154,6 +1497,68 @@ export const analyticsAPI = {
       console.log('Using mock comprehensive analytics data for development');
       return mockAnalyticsData;
     }
+  },
+};
+
+export const walletAPI = {
+  getSummary: async () => {
+    try {
+      const response = await api.get('/api/v1/wallet/summary');
+      return response.data;
+    } catch (error) {
+      assertMocksEnabled(error);
+      return { balance: 0, balance_cents: 0, promotions: [] };
+    }
+  },
+  getPromotions: async () => {
+    try {
+      const response = await api.get('/api/v1/wallet/promotions');
+      return response.data;
+    } catch (error) {
+      assertMocksEnabled(error);
+      console.log('Using mock wallet promotions for development');
+      return [];
+    }
+  },
+  issuePromotion: async (payload) => {
+    try {
+      const response = await api.post('/api/v1/wallet/promotions/issue', payload);
+      return response.data;
+    } catch (error) {
+      assertMocksEnabled(error);
+      throw error;
+    }
+  },
+  acknowledgePromotion: async (promotionId) => {
+    try {
+      const response = await api.post(`/api/v1/wallet/promotions/${promotionId}/acknowledge`);
+      return response.data;
+    } catch (error) {
+      assertMocksEnabled(error);
+      throw error;
+    }
+  },
+  lockPromotion: async (promotionId, amount) => {
+    try {
+      const response = await api.post(`/api/v1/wallet/promotions/${promotionId}/lock`, { amount });
+      return response.data;
+    } catch (error) {
+      assertMocksEnabled(error);
+      throw error;
+    }
+  },
+  redeemPromotion: async (promotionId, payload) => {
+    try {
+      const response = await api.post(`/api/v1/wallet/promotions/${promotionId}/redeem`, payload);
+      return response.data;
+    } catch (error) {
+      assertMocksEnabled(error);
+      throw error;
+    }
+  },
+  confirmCheckout: async (payload) => {
+    const response = await api.post('/api/v1/wallet/checkout/confirm', payload);
+    return response.data;
   },
 };
 

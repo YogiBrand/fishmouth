@@ -1,0 +1,60 @@
+{
+  "US": {
+    "general": [
+      "Leads that pick up the phone",
+      "High-intent homeowners (not tire\u2011kickers)",
+      "Transparent lead scoring & proof (imagery + overlays)",
+      "Insurance workflow support (adjuster, supplements)",
+      "No wasted time on bad addresses or wrong contacts"
+    ]
+  },
+  "states": {
+    "TX": [
+      "Frequent hail & wind; carrier scrutiny",
+      "Large, complex roofs; production scheduling",
+      "Neighborhoods hit in waves (timing matters)"
+    ],
+    "FL": [
+      "Hurricanes & wind uplift; code upgrades",
+      "Tile & metal popularity; material availability",
+      "Insurance volatility; documentation matters"
+    ],
+    "AZ": [
+      "Extreme UV & heat cycles; brittle shingles",
+      "Dust & debris in valleys; flashing failures"
+    ],
+    "WA": [
+      "Moss & algae growth; moisture intrusion",
+      "Ventilation & attic humidity issues"
+    ],
+    "CO": [
+      "Hail season May\u2013July; steep-slope mix",
+      "Blue\u2011tarp urgency; HOA approvals"
+    ],
+    "IL": [
+      "Freeze\u2011thaw cycles; ice damming",
+      "Older housing stock; decking surprises"
+    ],
+    "NY": [
+      "Snow loads & ice dams upstate",
+      "Permits/inspections; DOB nuances"
+    ]
+  },
+  "cities": {
+    "Houston": [
+      "Hail + wind; widespread neighborhoods",
+      "Steep competition; response speed wins"
+    ],
+    "Dallas": [
+      "High hail frequency; shingle bruising",
+      "Insurance adjuster saturation; document everything"
+    ],
+    "Phoenix": [
+      "UV/thermal stress; expansion/contraction",
+      "Tile underlayment failures common"
+    ],
+    "Seattle": [
+      "Moss & algae; low-slope moisture issues"
+    ]
+  }
+}

@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useRef } from 'react';
 import maplibregl from 'maplibre-gl';
 import 'maplibre-gl/dist/maplibre-gl.css';
 import Draw from '@mapbox/mapbox-gl-draw';
@@ -8,7 +8,6 @@ import api from '../../services/api/client';
 export default function LeadMap({ initialCenter=[-96, 37.8], initialZoom=4, onPolygon }){
   const mapRef = useRef(null);
   const containerRef = useRef(null);
-  const [draw, setDraw] = useState(null);
   const leadsSourceId = 'lead-points';
 
   useEffect(()=>{
@@ -47,7 +46,7 @@ export default function LeadMap({ initialCenter=[-96, 37.8], initialZoom=4, onPo
       controls: { polygon: true, trash: true }
     });
     map.addControl(drawCtl, 'top-left');
-    setDraw(drawCtl);
+    // Keep Draw control reference within closure
 
     const ensureSource = () => {
       if (!map.getSource(leadsSourceId)) {
@@ -130,7 +129,7 @@ export default function LeadMap({ initialCenter=[-96, 37.8], initialZoom=4, onPo
         map.off('moveend', fetchLeadsForViewport);
       map.remove();
     };
-  }, []);
+  }, [initialCenter, initialZoom, onPolygon]);
 
   return <div className="w-full h-[70vh] rounded border" ref={containerRef} />;
 }

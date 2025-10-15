@@ -1,7 +1,7 @@
 {
   "info": {
-    "name": "Fish Mouth Boost",
-    "_postman_id": "boost-collection",
+    "name": "Fish Mouth Boost Smoke Tests",
+    "_postman_id": "a0fe7116-1369-437c-b0d0-c74c33904d2d",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
   "item": [
@@ -16,26 +16,26 @@
           }
         ],
         "url": {
-          "raw": "{{api}}/api/v1/reports/TEST/render",
+          "raw": "{{baseUrl}}/api/v1/reports/demo/render",
           "host": [
-            "{{api}}"
+            "{{baseUrl}}"
           ],
           "path": [
             "api",
             "v1",
             "reports",
-            "TEST",
+            "demo",
             "render"
           ]
         },
         "body": {
           "mode": "raw",
-          "raw": "{\"force\": true, \"html\": \"<html><body><h1>Test</h1></body></html>\"}"
+          "raw": "{\"html\": \"<html><body><h1>Demo Report</h1></body></html>\"}"
         }
       }
     },
     {
-      "name": "Client Event",
+      "name": "Create Share",
       "request": {
         "method": "POST",
         "header": [
@@ -45,21 +45,57 @@
           }
         ],
         "url": {
-          "raw": "{{api}}/api/v1/events",
+          "raw": "{{baseUrl}}/api/v1/reports/demo/share",
           "host": [
-            "{{api}}"
+            "{{baseUrl}}"
           ],
           "path": [
             "api",
             "v1",
-            "events"
+            "reports",
+            "demo",
+            "share"
           ]
         },
         "body": {
           "mode": "raw",
-          "raw": "{\"type\": \"ui.viewer_open\", \"payload\": {\"page\": \"report\"}}"
+          "raw": "{\"report_id\": \"demo\", \"expires_in\": 604800}"
         }
       }
+    },
+    {
+      "name": "Send SMS (dry-run)",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": {
+          "raw": "{{baseUrl}}/api/v1/outbox/send",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "api",
+            "v1",
+            "outbox",
+            "send"
+          ]
+        },
+        "body": {
+          "mode": "raw",
+          "raw": "{\"channel\": \"sms\", \"to\": \"+15551234567\", \"text\": \"Hello from Fish Mouth\"}"
+        }
+      }
+    }
+  ],
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "http://localhost:8000"
     }
   ]
 }

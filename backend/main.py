@@ -12,23 +12,37 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import sentry_sdk
 import structlog
-from fastapi import FastAPI, Depends, HTTPException, Request, WebSocket, WebSocketDisconnect, status, UploadFile, File
+from fastapi import FastAPI, Depends, HTTPException, Request, WebSocket, WebSocketDisconnect, status, UploadFile, File, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from prometheus_fastapi_instrumentator import Instrumentator
 from sqlalchemy import func, text
 from sqlalchemy.orm import Session
-from pydantic import BaseModel, EmailStr
-from typing import Optional, List, Dict
+from pydantic import BaseModel, EmailStr, Field
+from typing import Optional, List, Dict, Any
 from datetime import date, datetime, timedelta
+import secrets
 from pathlib import Path
 
 from database import engine, get_db, Base, SessionLocal
 from models import (
-    User, AreaScan, Lead, LeadPriority, LeadStatus, VoiceCall, VoiceCallTurn, 
-    VoiceBooking, VoiceConfiguration, VoiceMetricsDaily, LeadActivity, VoiceCallEvent, BillingUsage, AuditLog,
-    Contractor
+    User,
+    AreaScan,
+    Lead,
+    LeadPriority,
+    LeadStatus,
+    VoiceCall,
+    VoiceCallTurn,
+    VoiceBooking,
+    VoiceConfiguration,
+    VoiceMetricsDaily,
+    LeadActivity,
+    VoiceCallEvent,
+    BillingUsage,
+    AuditLog,
+    Contractor,
+    WalletPromotion,
 )
 from auth import (
     verify_password,
@@ -41,12 +55,16 @@ from auth import (
 from services.lead_generation_service import LeadGenerationService
 from services.sequence_service import SequenceService
 from services.billing_service import aggregate_usage_for_period, calculate_platform_margin, get_billing_summary
-from services.billing_stripe import create_subscription, ensure_customer
+from services.billing_stripe import create_checkout_session, create_subscription, ensure_customer
 from services.voice_agent_service import VoiceAgentService, VoiceAnalyticsService, VoiceCallConfig
 from services.voice.streaming import WebsocketTelnyxStream, register_stream
 from services.scan_progress import progress_notifier
 from services.audit_service import record_audit_event
 from services.encryption import decrypt_value
+from services.promotion_service import (
+    lock_promotion as promotion_lock_promotion,
+    serialize_promotion as serialize_wallet_promotion,
+)
 from config import get_settings
 from app.api.v1.ai_voice import router as ai_voice_router
 from app.api.v1.contagion import router as contagion_router
@@ -60,8 +78,12 @@ from app.api.v1.mailers import router as mailers_router
 from app.api.v1.scan_jobs import router as scan_jobs_router
 from app.api.v1.scans import router as scans_router
 from app.api.v1.reports_render import router as reports_render_router
-from app.api.v1.shares import public_router as public_shares_router
-from app.api.v1.shares import router as shares_router
+from app.api.v1.public_shares import (
+    public_router as public_view_router,
+    router as shares_router,
+)
+from app.api.v1.shortlinks import router as shortlinks_router
+from app.api.v1.health import router as health_router
 from app.api.v1.app_config import router as app_config_router
 from app.api.v1.activity_feed import router as activity_router
 from app.api.v1.sequences import (
@@ -72,14 +94,20 @@ from app.api.v1.templates import router as templates_router
 from app.api.v1.outbox import router as outbox_router
 from app.api.v1.growth import router as growth_router
 from app.api.v1.geoip import router as geoip_router
+from app.api.v1.geo import router as geo_router
 from app.api.v1.assets import router as assets_router
 from app.api.v1.maps import router as maps_router
+from app.api.v1.wallet import router as wallet_router
+from app.api.v1.marketing import router as marketing_router
+from app.api.v1.geo_guess import router as geo_guess_router
 from services.sequence_delivery import get_delivery_adapters
 from app.services.activity_stream import activity_notifier
 from cryptography.exceptions import InvalidSignature
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
 from logging_config import bind_request_context, clear_request_context, configure_logging
 from shared.observability import init_tracing
+from app.lib import request_id_middleware_factory
+from app.lib.otel import setup_otel
 
 # Create tables
 Base.metadata.create_all(bind=engine)
@@ -87,6 +115,7 @@ Base.metadata.create_all(bind=engine)
 settings = get_settings()
 configure_logging()
 init_tracing("backend")
+setup_otel("fishmouth-backend")
 
 if settings.instrumentation.sentry_dsn:
     sentry_sdk.init(
@@ -124,6 +153,7 @@ except Exception:
     pass
 app.mount("/uploads", StaticFiles(directory=uploads_dir), name="uploads")
 
+app.include_router(health_router)
 app.include_router(reports_router)
 app.include_router(enhanced_reports_router)
 app.include_router(contagion_router)
@@ -136,10 +166,12 @@ app.include_router(scan_jobs_router)
 app.include_router(scans_router)
 app.include_router(maps_router)
 app.include_router(assets_router)
+app.include_router(wallet_router)
 app.include_router(events_router)
 app.include_router(reports_render_router)
 app.include_router(shares_router)
-app.include_router(public_shares_router)
+app.include_router(public_view_router)
+app.include_router(shortlinks_router)
 app.include_router(app_config_router)
 app.include_router(activity_router)
 app.include_router(sequences_api_router)
@@ -148,11 +180,21 @@ app.include_router(templates_router)
 app.include_router(outbox_router)
 app.include_router(growth_router)
 app.include_router(geoip_router)
+app.include_router(geo_router)
+app.include_router(geo_guess_router)
+app.include_router(marketing_router)
+
+
+app.middleware("http")(request_id_middleware_factory("X-Request-ID"))
 
 
 @app.middleware("http")
 async def request_logging_middleware(request: Request, call_next):
-    request_id = request.headers.get("X-Request-ID", str(uuid.uuid4()))
+    request_id = (
+        getattr(request.state, "request_id", None)
+        or request.headers.get("X-Request-ID")
+        or str(uuid.uuid4())
+    )
     request.state.request_id = request_id
     bind_request_context(request_id=request_id)
     logger.info("request.received", method=request.method, path=str(request.url.path))
@@ -451,33 +493,6 @@ class LeadFilter(BaseModel):
 @app.get("/")
 async def root():
     return {"message": "Fish Mouth AI API", "status": "online"}
-
-@app.get("/healthz")
-async def healthz() -> dict:
-    return {
-        "status": "ok",
-        "service": "backend",
-        "timestamp": datetime.utcnow().isoformat(),
-    }
-
-
-@app.get("/readyz")
-async def readyz(db: Session = Depends(get_db)) -> dict:
-    try:
-        db.execute(text("SELECT 1"))
-        return {
-            "status": "healthy",
-            "service": "backend",
-            "timestamp": datetime.utcnow().isoformat(),
-        }
-    except Exception as exc:  # pragma: no cover - defensive
-        logger.error("readyz.failed", error=str(exc))
-        raise HTTPException(status_code=503, detail="service unavailable") from exc
-
-
-@app.get("/health")
-async def legacy_health():
-    return await readyz()
 
 @app.post("/auth/signup", response_model=Token)
 async def signup(user: UserCreate, db: Session = Depends(get_db)):
@@ -1966,6 +1981,41 @@ async def get_sequence_performance(
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
 
+
+@app.get("/api/sequences/{sequence_id}/analytics")
+async def get_sequence_analytics(
+    sequence_id: int,
+    step: Optional[str] = Query(default=None),
+    status: Optional[str] = Query(default=None),
+    channel: Optional[str] = Query(default=None),
+    timeframe: Optional[str] = Query(default="30d"),
+    search: Optional[str] = Query(default=None),
+    limit: int = Query(default=50, ge=1, le=200),
+    offset: int = Query(default=0, ge=0),
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Return detailed analytics for sequence delivery and engagement."""
+    filters = {
+        "step": step,
+        "status": status,
+        "channel": channel,
+        "timeframe": timeframe,
+        "search": search,
+    }
+    try:
+        analytics = SequenceService.get_sequence_analytics(
+            sequence_id,
+            current_user.id,
+            db,
+            filters=filters,
+            limit=limit,
+            offset=offset,
+        )
+        return analytics
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
 @app.get("/api/sequences/templates")
 async def get_sequence_templates():
     """Get available sequence templates"""
@@ -2057,6 +2107,108 @@ class BillingUsageResponse(BaseModel):
 
 class StripeProvisionRequest(BaseModel):
     price_id: Optional[str] = None
+
+
+class StripeSessionRequest(BaseModel):
+    amount: Optional[float] = Field(default=None, gt=0)
+    type: Optional[str] = None
+    planId: Optional[str] = Field(default=None, alias="planId")
+    promotion_id: Optional[int] = Field(default=None, alias="promotion_id")
+    promotion_code: Optional[str] = Field(default=None, alias="promotion_code")
+
+    class Config:
+        allow_population_by_field_name = True
+
+
+def _mock_checkout_url() -> str:
+    token = secrets.token_hex(6)
+    return f"https://dashboard.stripe.com/test-mode/checkout/mock-{token}"
+
+
+@app.post("/api/billing/stripe/session")
+async def create_billing_stripe_session(
+    payload: StripeSessionRequest,
+    current_user: User = Depends(get_current_user),
+):
+    amount = payload.amount or 0.0
+    if amount <= 0:
+        raise HTTPException(status_code=400, detail="Amount must be greater than zero")
+
+    session = SessionLocal()
+    promotion_record: Optional[WalletPromotion] = None
+    checkout_session: Optional[Dict[str, Any]] = None
+    try:
+        if payload.promotion_id or payload.promotion_code:
+            query = session.query(WalletPromotion).filter(WalletPromotion.user_id == current_user.id)
+            if payload.promotion_id:
+                query = query.filter(WalletPromotion.id == payload.promotion_id)
+            if payload.promotion_code:
+                query = query.filter(WalletPromotion.code == payload.promotion_code)
+            promotion_record = query.first()
+            if not promotion_record:
+                raise HTTPException(status_code=404, detail="Promotion not found")
+            try:
+                promotion_lock_promotion(session, promotion_record, amount=amount)
+            except ValueError as exc:
+                session.rollback()
+                raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+        amount_cents = int(round(amount * 100))
+        if amount_cents <= 0:
+            raise HTTPException(status_code=400, detail="Amount must be greater than zero")
+
+        base_frontend = str(settings.frontend_url) if settings.frontend_url else "http://localhost:3000"
+        success_url = f"{base_frontend.rstrip('/')}/wallet?status=success&session_id={{CHECKOUT_SESSION_ID}}"
+        cancel_url = f"{base_frontend.rstrip('/')}/wallet?status=cancelled&session_id={{CHECKOUT_SESSION_ID}}"
+
+        metadata: Dict[str, Any] = {}
+        if payload.type:
+            metadata["intent_type"] = payload.type
+        if payload.planId:
+            metadata["plan_id"] = payload.planId
+        if promotion_record:
+            multiplier = promotion_record.multiplier or 2
+            metadata.setdefault("promotion_id", promotion_record.id)
+            metadata.setdefault("promotion_code", promotion_record.code)
+            metadata.setdefault("promotion_multiplier", multiplier)
+            metadata.setdefault("promotion_credit_amount", int(amount_cents * multiplier))
+        metadata.setdefault(
+            "credit_amount",
+            int(amount_cents if not promotion_record else amount_cents * (promotion_record.multiplier or 2)),
+        )
+
+        try:
+            checkout_session = create_checkout_session(
+                user=current_user,
+                amount_cents=amount_cents,
+                success_url=success_url,
+                cancel_url=cancel_url,
+                promotion=promotion_record,
+                metadata=metadata,
+            )
+        except ValueError as exc:
+            session.rollback()
+            raise HTTPException(status_code=400, detail=str(exc))
+
+        if promotion_record:
+            session.add(promotion_record)
+        session.commit()
+    finally:
+        session.close()
+
+    if checkout_session:
+        response: Dict[str, Any] = {
+            "checkoutUrl": checkout_session.get("url"),
+            "sessionId": checkout_session.get("id"),
+            "mode": checkout_session.get("mode"),
+        }
+    else:
+        response = {"checkoutUrl": _mock_checkout_url(), "sessionId": None, "mock": True}
+
+    if promotion_record:
+        response["promotion"] = serialize_wallet_promotion(promotion_record)
+
+    return response
 
 
 class AuditLogResponse(BaseModel):

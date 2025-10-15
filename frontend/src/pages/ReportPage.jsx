@@ -81,13 +81,7 @@ const ReportPage = () => {
   }, [editing, editingSection, sectionOrder]);
 
   // Load report data
-  useEffect(() => {
-    if (reportId) {
-      loadReport();
-    }
-  }, [reportId]);
-
-  const loadReport = async () => {
+  const loadReport = useCallback(async () => {
     setLoading(true);
     try {
       const [reportResponse, businessResponse] = await Promise.all([
@@ -120,7 +114,13 @@ const ReportPage = () => {
     } finally {
       setLoading(false);
     }
-  };
+  }, [reportId, navigate]);
+
+  useEffect(() => {
+    if (reportId) {
+      loadReport();
+    }
+  }, [reportId, loadReport]);
 
   // Save report changes
   const saveReport = async () => {

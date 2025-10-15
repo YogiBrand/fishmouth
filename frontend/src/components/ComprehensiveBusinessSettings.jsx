@@ -2349,7 +2349,6 @@ const ValuePropositionEditor = ({ propositions = [], onChange }) => {
       setValue('');
     }
   };
-  const remove = (i) => onChange((propositions || []).filter((_, idx) => idx !== i));
   return (
     <div className="space-y-3">
       <h3 className="text-lg font-semibold text-slate-900">Value Propositions</h3>
@@ -2357,7 +2356,12 @@ const ValuePropositionEditor = ({ propositions = [], onChange }) => {
         {(propositions || []).map((p, i) => (
           <div key={`${p}-${i}`} className="flex items-center gap-2 p-3 bg-slate-50 rounded-lg">
             <span className="flex-1 text-sm">{p}</span>
-            <button onClick={() => remove(i)} className="p-1 text-red-500 hover:text-red-700"><Trash2 size={14} /></button>
+            <button
+              onClick={() => onChange((propositions || []).filter((_, idx) => idx !== i))}
+              className="p-1 text-red-500 hover:text-red-700"
+            >
+              <Trash2 size={14} />
+            </button>
           </div>
         ))}
       </div>
@@ -2413,7 +2417,6 @@ const CaseStudyManager = ({ caseStudies = [], onAdd, onRemove, onChange }) => {
     onAdd({ ...draft, id: `${Date.now()}` });
     setDraft({ title: '', location: '', date: '', scope: '', challenge: '', solution: '', results: '', images: [], beforeAfter: [] });
   };
-  const remove = (idx) => onRemove(idx);
   const updateField = (field, value) => setDraft((d) => ({ ...d, [field]: value }));
 
   const isValid = draft.title.trim().length > 0 && (draft.scope.trim().length > 0 || draft.results.trim().length > 0);

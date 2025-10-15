@@ -1,11 +1,13 @@
-# PRD‑08 · Dashboard Home (Leads-Centric)
+# PRD‑08 · Dashboard Home (Lead-centric)
 
-**Layout**
-1. KPI Row (today/7d): HOT, WARM, Reports Sent, Views, Replies/Clicks, Appointments.
-2. Lead Queue (tabs): HOT • WARM • Follow-ups • Unreached • DNC.
-3. Map & Heat (polygon filter).
-4. Funnel (Sent→Viewed→Replied/Clicked→Appointment).
-5. Activity Feed & Tasks.
-6. ROI Card.
+**KPI row (today/7d)**: HOT, WARM, Reports Sent, Report Views, Replies/Clicks, Appointments.
 
-**Acceptance**: p95 load <300ms; actions within 1–2 clicks.
+**Lead Queue**: Tabs (HOT, WARM, Follow‑ups, Unreached, DNC). Columns: Address, Owner, Verified Contacts, Roof Age, Priority, Confidence, Reasons, Last Activity, Next Step, Actions.
+
+**Map & Heat**: Cluster by priority; polygon filter.
+
+**Funnel**: Sent → Viewed → Replied/Clicked → Appointment; show conversion + median time.
+
+**Activity & Tasks**: Unified feed, bounce retries, missed-call callbacks, low-confidence reviews.
+
+**ROI Card**: Leads unlocked, cost, appointments, wins.

@@ -2,12 +2,13 @@ import React, { useState, useEffect } from 'react';
 import {
   Plus, Edit, Trash2, Play, Pause,
   Clock, Target, Copy,
-  Zap, Search, Sparkles
+  Zap, Search, Sparkles, BarChart3
 } from 'lucide-react';
 import { leadAPI, sequenceAPI } from '../services/api';
 import { formatDistanceToNow } from 'date-fns';
 import toast from 'react-hot-toast';
 import SequenceBuilder from './SequenceBuilder';
+import SequenceAnalyticsPanel from './SequenceAnalyticsPanel';
 
 const uniqueNodeId = (prefix) => `${prefix}_${Math.random().toString(36).slice(2, 8)}`;
 
@@ -245,6 +246,15 @@ const DEFAULT_TEMPLATES = [
   },
 ];
 
+const ANALYTICS_PAGE_SIZE = 50;
+const DEFAULT_ANALYTICS_FILTERS = {
+  timeframe: '30d',
+  status: '',
+  channel: '',
+  step: '',
+  search: '',
+};
+
 const SequenceManager = ({ isDark = false }) => {
   const [sequences, setSequences] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -255,6 +265,16 @@ const SequenceManager = ({ isDark = false }) => {
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState('');
   const [isProcessing, setIsProcessing] = useState(false);
+  const [analyticsSequence, setAnalyticsSequence] = useState(null);
+  const [analyticsData, setAnalyticsData] = useState(null);
+  const [analyticsFilters, setAnalyticsFilters] = useState(DEFAULT_ANALYTICS_FILTERS);
+  const [analyticsPagination, setAnalyticsPagination] = useState({
+    limit: ANALYTICS_PAGE_SIZE,
+    offset: 0,
+    total: 0,
+  });
+  const [analyticsLoading, setAnalyticsLoading] = useState(false);
+  const [analyticsError, setAnalyticsError] = useState(null);
 
   useEffect(() => {
     loadSequences();
@@ -394,6 +414,89 @@ const SequenceManager = ({ isDark = false }) => {
     }
   };
 
+  const fetchSequenceAnalytics = async (
+    sequenceId,
+    { filters: overrideFilters, offset: overrideOffset } = {}
+  ) => {
+    if (!sequenceId) return;
+    const mergedFilters = overrideFilters
+      ? { ...DEFAULT_ANALYTICS_FILTERS, ...overrideFilters }
+      : { ...analyticsFilters };
+    const resolvedOffset =
+      typeof overrideOffset === 'number'
+        ? overrideOffset
+        : overrideFilters
+          ? 0
+          : analyticsPagination.offset;
+
+    setAnalyticsLoading(true);
+    try {
+      const response = await sequenceAPI.getAnalytics(sequenceId, {
+        timeframe: mergedFilters.timeframe,
+        status: mergedFilters.status,
+        channel: mergedFilters.channel,
+        step: mergedFilters.step,
+        search: mergedFilters.search,
+        limit: ANALYTICS_PAGE_SIZE,
+        offset: resolvedOffset,
+      });
+      setAnalyticsData(response);
+      setAnalyticsFilters(mergedFilters);
+      setAnalyticsPagination({
+        limit: response.engagements?.limit ?? ANALYTICS_PAGE_SIZE,
+        offset: response.engagements?.offset ?? resolvedOffset,
+        total: response.engagements?.total ?? 0,
+      });
+      setAnalyticsError(null);
+    } catch (error) {
+      console.error('Error loading sequence analytics:', error);
+      setAnalyticsError('Unable to load analytics right now.');
+      toast.error('Failed to load analytics');
+    } finally {
+      setAnalyticsLoading(false);
+    }
+  };
+
+  const handleViewAnalytics = (sequence) => {
+    if (!sequence) return;
+    setAnalyticsSequence(sequence);
+    const baseFilters = { ...DEFAULT_ANALYTICS_FILTERS };
+    setAnalyticsFilters(baseFilters);
+    setAnalyticsPagination({
+      limit: ANALYTICS_PAGE_SIZE,
+      offset: 0,
+      total: 0,
+    });
+    fetchSequenceAnalytics(sequence.id, { filters: baseFilters, offset: 0 });
+  };
+
+  const handleAnalyticsRefresh = () => {
+    if (!analyticsSequence) return;
+    fetchSequenceAnalytics(analyticsSequence.id);
+  };
+
+  const handleAnalyticsFilterChange = (changes = {}) => {
+    if (!analyticsSequence) return;
+    const updatedFilters = { ...analyticsFilters, ...changes };
+    fetchSequenceAnalytics(analyticsSequence.id, { filters: updatedFilters, offset: 0 });
+  };
+
+  const handleAnalyticsReset = () => {
+    if (!analyticsSequence) return;
+    fetchSequenceAnalytics(analyticsSequence.id, { filters: DEFAULT_ANALYTICS_FILTERS, offset: 0 });
+  };
+
+  const handleAnalyticsPaginate = (nextOffset) => {
+    if (!analyticsSequence) return;
+    fetchSequenceAnalytics(analyticsSequence.id, { filters: analyticsFilters, offset: nextOffset });
+  };
+
+  const handleCloseAnalytics = () => {
+    setAnalyticsSequence(null);
+    setAnalyticsData(null);
+    setAnalyticsError(null);
+  };
+
   const closeBuilder = async ({ deleteDraft = false, reload = false } = {}) => {
     if (deleteDraft && selectedSequence?.__isNew && selectedSequence?.id) {
       try {
@@ -465,6 +568,14 @@ const SequenceManager = ({ isDark = false }) => {
             title="Edit Sequence"
           >
             <Edit size={16} />
+          </button>
+          
+          <button
+            onClick={() => handleViewAnalytics(sequence)}
+            className="p-2 text-indigo-600 dark:text-indigo-300 hover:bg-indigo-50 dark:hover:bg-indigo-500/20 rounded-lg transition-colors"
+            title="View Analytics"
+          >
+            <BarChart3 size={16} />
           </button>
           
           <button
@@ -747,6 +858,21 @@ const SequenceManager = ({ isDark = false }) => {
             </div>
           </div>
         </div>
+      )}
+
+      {analyticsSequence && (
+        <SequenceAnalyticsPanel
+          sequence={analyticsSequence}
+          analytics={analyticsData}
+          filters={analyticsFilters}
+          loading={analyticsLoading}
+          error={analyticsError}
+          onClose={handleCloseAnalytics}
+          onRefresh={handleAnalyticsRefresh}
+          onFilterChange={handleAnalyticsFilterChange}
+          onResetFilters={handleAnalyticsReset}
+          onPaginate={handleAnalyticsPaginate}
+        />
       )}
     </div>
   );

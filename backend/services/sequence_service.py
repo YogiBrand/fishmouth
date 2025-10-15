@@ -1,8 +1,9 @@
+from collections import defaultdict
 from datetime import datetime, timedelta, timezone
-from typing import Dict, List, Optional, Any
+from typing import Any, Dict, List, Optional, Set, Tuple
 
 from sqlalchemy import or_
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, selectinload
 
 from config import get_settings
 from database import SessionLocal
@@ -17,6 +18,7 @@ from models import (
     LeadActivity,
     VoiceCall,
     SequenceExecution,
+    MessageEvent,
 )
 from zoneinfo import ZoneInfo
 from services.sequence_scheduler import schedule_enrollment_execution, trigger_pending_scan
@@ -66,6 +68,73 @@ class SequenceService:
             return SequenceNodeType(node_type)
         except ValueError as exc:
             raise ValueError(f"Unsupported node type '{node_type}'") from exc
+
+    @staticmethod
+    def _resolve_timeframe_start(timeframe: Optional[str]) -> Optional[datetime]:
+        """Translate a timeframe string (e.g. 7d, 30d, all) into a UTC start timestamp."""
+        if not timeframe:
+            timeframe = "30d"
+        window = timeframe.strip().lower()
+        now = datetime.utcnow()
+
+        presets = {
+            "24h": timedelta(hours=24),
+            "48h": timedelta(hours=48),
+            "7d": timedelta(days=7),
+            "14d": timedelta(days=14),
+            "30d": timedelta(days=30),
+            "60d": timedelta(days=60),
+            "90d": timedelta(days=90),
+        }
+        if window in {"all", "lifetime", "any"}:
+            return None
+        if window in presets:
+            return now - presets[window]
+        if window.endswith("d"):
+            try:
+                days = int(window[:-1])
+                return now - timedelta(days=max(days, 0))
+            except ValueError:
+                return now - timedelta(days=30)
+        if window.endswith("h"):
+            try:
+                hours = int(window[:-1])
+                return now - timedelta(hours=max(hours, 0))
+            except ValueError:
+                return now - timedelta(days=30)
+        return now - timedelta(days=30)
+
+    @staticmethod
+    def _derive_channel(
+        adapter: Optional[str],
+        node_type: Optional[SequenceNodeType],
+    ) -> str:
+        """Normalise adapter/node_type into a display channel."""
+        if adapter:
+            channel = adapter.lower()
+            mapping = {
+                "email": "email",
+                "sms": "sms",
+                "voice": "voice",
+                "voice_call": "voice",
+                "report": "report",
+                "smartscan": "smartscan",
+                "task": "task",
+            }
+            return mapping.get(channel, channel)
+        if node_type:
+            mapping = {
+                SequenceNodeType.EMAIL: "email",
+                SequenceNodeType.SMS: "sms",
+                SequenceNodeType.VOICE_CALL: "voice",
+                SequenceNodeType.WAIT: "wait",
+                SequenceNodeType.CONDITION: "condition",
+                SequenceNodeType.RESEARCH: "research",
+                SequenceNodeType.START: "start",
+                SequenceNodeType.END: "end",
+            }
+            return mapping.get(node_type, node_type.value.lower())
+        return "automation"
 
     @staticmethod
     def trigger_processing() -> None:
@@ -515,6 +584,665 @@ class SequenceService:
             "avg_completion_time_hours": 72,  # Mock data
             "best_performing_node": "voice_call",  # Mock data
             "drop_off_points": ["sms_1", "email_1"]  # Mock data
+        }
+
+    @staticmethod
+    def get_sequence_analytics(
+        sequence_id: int,
+        user_id: int,
+        db: Session,
+        *,
+        filters: Optional[Dict[str, Any]] = None,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> Dict[str, Any]:
+        """Aggregate delivery + engagement analytics for a sequence."""
+        filters = filters or {}
+        timeframe = filters.get("timeframe") or "30d"
+        step_filter = (filters.get("step") or "").strip() or None
+        status_filter = (filters.get("status") or "").strip().lower() or None
+        channel_filter = (filters.get("channel") or "").strip().lower() or None
+        search_filter = (filters.get("search") or "").strip().lower() or None
+
+        limit = max(1, min(limit, 200))
+        offset = max(0, offset)
+
+        start_time = SequenceService._resolve_timeframe_start(timeframe)
+
+        sequence = (
+            db.query(Sequence)
+            .filter(Sequence.id == sequence_id, Sequence.user_id == user_id)
+            .first()
+        )
+        if not sequence:
+            raise ValueError("Sequence not found")
+
+        nodes = (
+            db.query(SequenceNode)
+            .filter(SequenceNode.sequence_id == sequence.id)
+            .all()
+        )
+        node_map = {node.node_id: node for node in nodes if node.node_id}
+        ordered_nodes = sorted(
+            nodes,
+            key=lambda n: (
+                n.position_y if n.position_y is not None else 0.0,
+                n.position_x if n.position_x is not None else 0.0,
+                n.id or 0,
+            ),
+        )
+
+        enrollments = (
+            db.query(SequenceEnrollment)
+            .options(selectinload(SequenceEnrollment.lead))
+            .filter(
+                SequenceEnrollment.sequence_id == sequence.id,
+                SequenceEnrollment.user_id == user_id,
+            )
+            .all()
+        )
+        enrollment_map = {enrollment.id: enrollment for enrollment in enrollments}
+        enrollment_ids: Set[int] = set(enrollment_map.keys())
+
+        total_enrolled = len(enrollments)
+        active_enrollments = sum(1 for e in enrollments if e.status == "active")
+        paused_enrollments = sum(1 for e in enrollments if e.status == "paused")
+        completed_enrollments = sum(1 for e in enrollments if e.status == "completed")
+        failed_enrollments = sum(1 for e in enrollments if e.status == "failed")
+        converted_enrollments = sum(
+            1 for e in enrollments if e.conversion_outcome == "converted"
+        )
+        conversion_rate = (
+            round((converted_enrollments / total_enrolled) * 100, 1)
+            if total_enrolled
+            else 0.0
+        )
+        completion_rate = (
+            round((completed_enrollments / total_enrolled) * 100, 1)
+            if total_enrolled
+            else 0.0
+        )
+        emails_sent_total = sum(e.emails_sent for e in enrollments)
+        sms_sent_total = sum(e.sms_sent for e in enrollments)
+        calls_made_total = sum(e.calls_made for e in enrollments)
+
+        node_types_present = {
+            node.node_type for node in nodes if getattr(node, "node_type", None)
+        }
+        def _missing_contact(predicate) -> int:
+            missing = 0
+            for enrollment in enrollments:
+                lead = enrollment.lead
+                if not lead or not predicate(lead):
+                    missing += 1
+            return missing
+
+        automation_health: List[Dict[str, Any]] = []
+        if SequenceNodeType.EMAIL in node_types_present:
+            missing_email = _missing_contact(lambda lead: bool(lead.homeowner_email))
+            automation_health.append(
+                {
+                    "channel": "email",
+                    "has_steps": True,
+                    "missing_contacts": missing_email,
+                    "ready_contacts": max(total_enrolled - missing_email, 0),
+                    "status": "attention" if missing_email else "ok",
+                }
+            )
+        if SequenceNodeType.SMS in node_types_present:
+            missing_sms = _missing_contact(lambda lead: bool(lead.homeowner_phone))
+            automation_health.append(
+                {
+                    "channel": "sms",
+                    "has_steps": True,
+                    "missing_contacts": missing_sms,
+                    "ready_contacts": max(total_enrolled - missing_sms, 0),
+                    "status": "attention" if missing_sms else "ok",
+                }
+            )
+        if SequenceNodeType.VOICE_CALL in node_types_present:
+            missing_voice = _missing_contact(lambda lead: bool(lead.homeowner_phone))
+            automation_health.append(
+                {
+                    "channel": "voice",
+                    "has_steps": True,
+                    "missing_contacts": missing_voice,
+                    "ready_contacts": max(total_enrolled - missing_voice, 0),
+                    "status": "attention" if missing_voice else "ok",
+                }
+            )
+
+        executions: List[SequenceExecution] = []
+        if enrollment_ids:
+            exec_query = (
+                db.query(SequenceExecution)
+                .filter(
+                    SequenceExecution.sequence_id == sequence.id,
+                    SequenceExecution.enrollment_id.in_(enrollment_ids),
+                    SequenceExecution.adapter.isnot(None),
+                )
+            )
+            if start_time:
+                exec_query = exec_query.filter(SequenceExecution.started_at >= start_time)
+            if step_filter:
+                exec_query = exec_query.filter(SequenceExecution.node_id == step_filter)
+            if channel_filter:
+                exec_query = exec_query.filter(SequenceExecution.adapter == channel_filter)
+            executions = exec_query.order_by(SequenceExecution.started_at.desc()).all()
+
+        message_ids: Set[str] = set()
+        for execution in executions:
+            metadata_source = getattr(execution, "metadata", None)
+            metadata = metadata_source if isinstance(metadata_source, dict) else None
+            if metadata is None:
+                metadata = execution.execution_metadata or {}
+            message_id_value = metadata.get("message_id") or metadata.get("id")
+            if message_id_value:
+                message_ids.add(str(message_id_value))
+
+        outbox_map: Dict[str, OutboxMessage] = {}
+        events_by_message: Dict[str, List[MessageEvent]] = defaultdict(list)
+        if message_ids:
+            outbox_rows = (
+                db.query(OutboxMessage)
+                .filter(OutboxMessage.id.in_(message_ids))
+                .all()
+            )
+            outbox_map = {str(row.id): row for row in outbox_rows}
+            event_rows = (
+                db.query(MessageEvent)
+                .filter(MessageEvent.message_id.in_(message_ids))
+                .order_by(MessageEvent.occurred_at.asc())
+                .all()
+            )
+            for event in event_rows:
+                events_by_message[str(event.message_id)].append(event)
+
+        all_records: List[Dict[str, Any]] = []
+        for execution in executions:
+            metadata_source = getattr(execution, "metadata", None)
+            metadata = metadata_source if isinstance(metadata_source, dict) else None
+            if metadata is None:
+                metadata = execution.execution_metadata or {}
+            node_id = execution.node_id or metadata.get("sequence_node_id")
+            enrollment = enrollment_map.get(execution.enrollment_id)
+            if not enrollment:
+                continue
+            lead = enrollment.lead
+            node = node_map.get(node_id)
+            channel = SequenceService._derive_channel(
+                execution.adapter,
+                node.node_type if node else execution.node_type,
+            )
+            if channel_filter and channel != channel_filter:
+                continue
+
+            message_id = metadata.get("message_id") or metadata.get("id")
+            message_key = str(message_id) if message_id else None
+            outbox = outbox_map.get(message_key) if message_key else None
+            events = events_by_message.get(message_key or "", [])
+
+            sent_dt = None
+            if outbox and (outbox.sent_at or outbox.created_at):
+                sent_dt = outbox.sent_at or outbox.created_at
+            if not sent_dt:
+                sent_dt = execution.started_at
+
+            delivered_dt = outbox.delivered_at if outbox else None
+            event_summaries: List[Dict[str, Any]] = []
+            engagement_candidates: List[Tuple[str, Optional[datetime], Dict[str, Any]]] = []
+            open_events = 0
+            click_events = 0
+            reply_events = 0
+            delivered_events = 0
+            failed_events = 0
+            for evt in events:
+                occurred_dt = evt.occurred_at
+                summary = {
+                    "type": evt.type,
+                    "occurred_at": occurred_dt.isoformat() if occurred_dt else None,
+                    "meta": evt.meta or {},
+                }
+                event_summaries.append(summary)
+                event_type = (evt.type or "").lower()
+                if event_type == "opened":
+                    open_events += 1
+                    engagement_candidates.append(("opened", occurred_dt, summary))
+                elif event_type == "clicked":
+                    click_events += 1
+                    engagement_candidates.append(("clicked", occurred_dt, summary))
+                elif event_type == "replied":
+                    reply_events += 1
+                    engagement_candidates.append(("replied", occurred_dt, summary))
+                elif event_type == "delivered":
+                    delivered_events += 1
+                elif event_type in {"failed", "bounced"}:
+                    failed_events += 1
+
+            engagement_event: Optional[Dict[str, Any]] = None
+            engagement_dt: Optional[datetime] = None
+            for priority in ("replied", "clicked", "opened"):
+                for event_type, occurred_dt, summary in engagement_candidates:
+                    if event_type == priority:
+                        engagement_event = summary
+                        engagement_dt = occurred_dt
+                        break
+                if engagement_event:
+                    break
+            if not engagement_event and engagement_candidates:
+                fallback_type, occurred_dt, summary = engagement_candidates[0]
+                engagement_event = summary
+                engagement_dt = occurred_dt
+
+            response_minutes_value: Optional[float] = None
+            if engagement_dt and sent_dt:
+                delta = (engagement_dt - sent_dt).total_seconds()
+                if delta >= 0:
+                    response_minutes_value = delta / 60.0
+
+            last_event_dt = engagement_dt
+            if not last_event_dt and events:
+                last_event_dt = events[-1].occurred_at
+            if not last_event_dt:
+                last_event_dt = delivered_dt or sent_dt
+
+            delivery_status_raw = (
+                (outbox.status.lower() if outbox and outbox.status else None)
+                or (execution.status.lower() if execution.status else None)
+                or "queued"
+            )
+            delivery_status = delivery_status_raw
+            if failed_events or delivery_status_raw in {"failed", "bounced"} or execution.status == "failed":
+                delivery_status = "failed"
+            elif delivered_events or (outbox and outbox.delivered_at):
+                delivery_status = "delivered"
+            elif delivery_status_raw in {"queued", "sending", "pending", "running"}:
+                delivery_status = "queued"
+            elif delivery_status_raw == "completed" and channel == "voice":
+                delivery_status = "completed"
+            elif delivery_status_raw == "sent":
+                delivery_status = "sent"
+
+            is_delivered = delivery_status == "delivered"
+            is_failed = delivery_status in {"failed", "bounced"}
+            is_queued = delivery_status in {"queued", "pending", "sending", "running"}
+            engaged_flag = bool(engagement_event and (engagement_event.get("type") or "").lower() in {"opened", "clicked", "replied"})
+
+            lead_payload = {
+                "id": lead.id if lead else None,
+                "name": (
+                    lead.homeowner_name
+                    or lead.address
+                    or (f"Lead #{lead.id}" if lead else "Lead")
+                )
+                if lead
+                else "Lead",
+                "email": lead.homeowner_email if lead else None,
+                "phone": lead.homeowner_phone if lead else None,
+                "city": lead.city if lead else None,
+                "state": lead.state if lead else None,
+                "score": lead.lead_score if lead else None,
+                "status": lead.status if lead else None,
+            }
+
+            node_label = ""
+            node_type_value = None
+            node_position = {"x": None, "y": None}
+            if node:
+                node_label = (node.config or {}).get("label") or node.node_id
+                node_type_value = node.node_type.value if node.node_type else None
+                node_position = {
+                    "x": node.position_x,
+                    "y": node.position_y,
+                }
+            else:
+                node_label = node_id or (execution.node_type.value if execution.node_type else "Step")
+                node_type_value = execution.node_type.value if execution.node_type else None
+
+            sent_iso = sent_dt.isoformat() if sent_dt else None
+            delivered_iso = delivered_dt.isoformat() if delivered_dt else None
+            last_event_iso = last_event_dt.isoformat() if last_event_dt else None
+
+            record = {
+                "execution_id": execution.id,
+                "channel": channel,
+                "lead": lead_payload,
+                "sequence_node": {
+                    "id": node_id,
+                    "label": node_label,
+                    "type": node_type_value,
+                    "channel": channel,
+                    "position": node_position,
+                },
+                "delivery": {
+                    "status": delivery_status,
+                    "engine_status": execution.status,
+                    "sent_at": sent_iso,
+                    "delivered_at": delivered_iso,
+                    "last_event_at": last_event_iso,
+                    "provider": metadata.get("provider") or (outbox.provider if outbox else None),
+                    "message_id": message_key,
+                },
+                "engagement": {
+                    "type": engagement_event.get("type") if engagement_event else None,
+                    "occurred_at": engagement_event.get("occurred_at") if engagement_event else None,
+                    "response_minutes": round(response_minutes_value, 1) if response_minutes_value is not None else None,
+                },
+                "events": event_summaries,
+                "enrollment": {
+                    "id": enrollment.id,
+                    "status": enrollment.status,
+                    "conversion_outcome": enrollment.conversion_outcome,
+                    "current_node_id": enrollment.current_node_id,
+                    "steps_completed": enrollment.steps_completed,
+                    "enrolled_at": enrollment.enrolled_at.isoformat() if enrollment.enrolled_at else None,
+                    "completed_at": enrollment.completed_at.isoformat() if enrollment.completed_at else None,
+                },
+            }
+
+            node_position_tuple = (
+                node.position_y if node and node.position_y is not None else 0.0,
+                node.position_x if node and node.position_x is not None else 0.0,
+                node.id if node and node.id is not None else 0,
+            )
+            record["_metrics"] = {
+                "node_id": node_id,
+                "delivered": 1 if is_delivered else 0,
+                "failed": 1 if is_failed else 0,
+                "queued": 1 if is_queued else 0,
+                "engaged": 1 if engaged_flag else 0,
+                "clicked": 1 if click_events > 0 else 0,
+                "opened": 1 if open_events > 0 else 0,
+                "replied": 1 if reply_events > 0 else 0,
+                "open_events": open_events,
+                "click_events": click_events,
+                "reply_events": reply_events,
+                "response_minutes": response_minutes_value,
+                "lead_id": lead.id if lead else None,
+                "channel": channel,
+                "sort_ts": (
+                    sent_dt.timestamp()
+                    if sent_dt
+                    else (execution.started_at.timestamp() if execution.started_at else 0.0)
+                ),
+                "node_position": node_position_tuple,
+            }
+            all_records.append(record)
+
+        def _aggregate_delivery(records_list: List[Dict[str, Any]]) -> Dict[str, Any]:
+            totals = {
+                "messages": len(records_list),
+                "delivered": 0,
+                "failed": 0,
+                "queued": 0,
+                "engaged": 0,
+                "clicked": 0,
+                "opened": 0,
+                "replied": 0,
+                "unique_leads": 0,
+                "average_response_minutes": None,
+                "engagement_rate": 0.0,
+                "delivery_rate": 0.0,
+                "failure_rate": 0.0,
+            }
+            if not records_list:
+                return totals
+
+            responses: List[float] = []
+            lead_ids: Set[int] = set()
+            for rec in records_list:
+                metrics = rec.get("_metrics") or {}
+                totals["delivered"] += metrics.get("delivered", 0)
+                totals["failed"] += metrics.get("failed", 0)
+                totals["queued"] += metrics.get("queued", 0)
+                totals["engaged"] += metrics.get("engaged", 0)
+                totals["clicked"] += metrics.get("clicked", 0)
+                totals["opened"] += metrics.get("opened", 0)
+                totals["replied"] += metrics.get("replied", 0)
+                response_value = metrics.get("response_minutes")
+                if isinstance(response_value, (int, float)):
+                    responses.append(float(response_value))
+                lead_id_val = metrics.get("lead_id")
+                if lead_id_val is not None:
+                    lead_ids.add(lead_id_val)
+            totals["unique_leads"] = len(lead_ids)
+            if responses:
+                totals["average_response_minutes"] = round(
+                    sum(responses) / len(responses), 1
+                )
+            if totals["messages"]:
+                totals["engagement_rate"] = round(
+                    (totals["engaged"] / totals["messages"]) * 100, 1
+                )
+                totals["delivery_rate"] = round(
+                    (totals["delivered"] / totals["messages"]) * 100, 1
+                )
+                totals["failure_rate"] = round(
+                    (totals["failed"] / totals["messages"]) * 100, 1
+                )
+            return totals
+
+        def _channel_breakdown(records_list: List[Dict[str, Any]]) -> Dict[str, Any]:
+            counts: Dict[str, int] = defaultdict(int)
+            for rec in records_list:
+                metrics = rec.get("_metrics") or {}
+                channel_name = metrics.get("channel") or "unknown"
+                counts[channel_name] += 1
+            total = sum(counts.values())
+            distribution = {
+                channel_name: round((count / total) * 100, 1) if total else 0.0
+                for channel_name, count in counts.items()
+            }
+            return {"counts": dict(counts), "distribution": distribution}
+
+        def _build_step_metrics(records_list: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+            step_map: Dict[str, Dict[str, Any]] = {}
+            for rec in records_list:
+                metrics = rec.get("_metrics") or {}
+                node_id_key = metrics.get("node_id")
+                if not node_id_key:
+                    continue
+                node = node_map.get(node_id_key)
+                entry = step_map.setdefault(
+                    node_id_key,
+                    {
+                        "node_id": node_id_key,
+                        "label": (node.config or {}).get("label") if node else node_id_key,
+                        "type": node.node_type.value if node and node.node_type else None,
+                        "channel": SequenceService._derive_channel(
+                            None, node.node_type if node else None
+                        ),
+                        "sends": 0,
+                        "delivered": 0,
+                        "failed": 0,
+                        "engagements": 0,
+                        "opens": 0,
+                        "clicks": 0,
+                        "replies": 0,
+                        "last_activity_at": None,
+                        "_responses": [],
+                        "_position": metrics.get("node_position")
+                        or (
+                            node.position_y if node and node.position_y is not None else 0.0,
+                            node.position_x if node and node.position_x is not None else 0.0,
+                            node.id if node and node.id is not None else 0,
+                        ),
+                    },
+                )
+                entry["sends"] += 1
+                entry["delivered"] += metrics.get("delivered", 0)
+                entry["failed"] += metrics.get("failed", 0)
+                entry["engagements"] += metrics.get("engaged", 0)
+                entry["opens"] += metrics.get("open_events", 0)
+                entry["clicks"] += metrics.get("click_events", 0)
+                entry["replies"] += metrics.get("reply_events", 0)
+                response_val = metrics.get("response_minutes")
+                if isinstance(response_val, (int, float)):
+                    entry["_responses"].append(float(response_val))
+                last_event_at = rec.get("delivery", {}).get("last_event_at")
+                if last_event_at:
+                    existing = entry["last_activity_at"]
+                    if not existing or last_event_at > existing:
+                        entry["last_activity_at"] = last_event_at
+
+            step_list: List[Dict[str, Any]] = []
+            for entry in step_map.values():
+                responses = entry.pop("_responses", [])
+                position = entry.pop("_position", (0.0, 0.0, 0))
+                sends = entry["sends"] or 1  # avoid division-by-zero
+                entry["engagement_rate"] = round(
+                    (entry["engagements"] / sends) * 100, 1
+                )
+                entry["delivery_rate"] = round((entry["delivered"] / sends) * 100, 1)
+                entry["failure_rate"] = round((entry["failed"] / sends) * 100, 1)
+                entry["avg_response_minutes"] = (
+                    round(sum(responses) / len(responses), 1) if responses else None
+                )
+                entry["_position"] = position
+                step_list.append(entry)
+
+            def _sort_key(item: Dict[str, Any]) -> Tuple[float, float, float]:
+                return item.get("_position", (0.0, 0.0, 0))
+
+            step_list.sort(key=_sort_key)
+            for item in step_list:
+                item.pop("_position", None)
+            return step_list
+
+        filtered_records = all_records
+        if status_filter:
+            def _match_status(record: Dict[str, Any]) -> bool:
+                delivery_status_local = (record.get("delivery", {}).get("status") or "").lower()
+                engagement_type = (record.get("engagement", {}).get("type") or "").lower()
+                if status_filter == "engaged":
+                    return bool(record.get("_metrics", {}).get("engaged"))
+                if status_filter == "responded":
+                    return engagement_type == "replied"
+                if status_filter == "delivered":
+                    return delivery_status_local == "delivered"
+                if status_filter == "queued":
+                    return delivery_status_local in {"queued", "pending", "sending", "running"}
+                if status_filter == "failed":
+                    return delivery_status_local in {"failed", "bounced"}
+                if status_filter == "sent":
+                    return delivery_status_local == "sent"
+                if status_filter == "completed":
+                    return delivery_status_local == "completed"
+                return delivery_status_local == status_filter
+
+            filtered_records = [rec for rec in filtered_records if _match_status(rec)]
+
+        if search_filter:
+            def _matches_search(record: Dict[str, Any]) -> bool:
+                lead_payload_local = record.get("lead", {})
+                values = [
+                    lead_payload_local.get("name") or "",
+                    lead_payload_local.get("email") or "",
+                    lead_payload_local.get("phone") or "",
+                    lead_payload_local.get("city") or "",
+                    lead_payload_local.get("state") or "",
+                    record.get("sequence_node", {}).get("label") or "",
+                ]
+                return any(search_filter in (value or "").lower() for value in values)
+
+            filtered_records = [rec for rec in filtered_records if _matches_search(rec)]
+
+        filtered_records.sort(
+            key=lambda rec: rec.get("_metrics", {}).get("sort_ts") or 0.0,
+            reverse=True,
+        )
+
+        overall_delivery = _aggregate_delivery(all_records)
+        filtered_delivery = _aggregate_delivery(filtered_records)
+        overall_step_metrics = _build_step_metrics(all_records)
+        filtered_step_metrics = _build_step_metrics(filtered_records)
+        overall_channel = _channel_breakdown(all_records)
+        filtered_channel = _channel_breakdown(filtered_records)
+
+        paginated_records = filtered_records[offset : offset + limit]
+
+        for rec in all_records:
+            rec.pop("_metrics", None)
+
+        step_options = [
+            {
+                "node_id": node.node_id,
+                "label": (node.config or {}).get("label") or node.node_id,
+                "type": node.node_type.value if node.node_type else None,
+                "channel": SequenceService._derive_channel(None, node.node_type),
+            }
+            for node in ordered_nodes
+        ]
+        channel_options = sorted(
+            {
+                SequenceService._derive_channel(None, node.node_type)
+                for node in ordered_nodes
+                if node.node_type
+            }
+        )
+
+        return {
+            "sequence": {
+                "id": sequence.id,
+                "name": sequence.name,
+                "description": sequence.description,
+                "is_active": sequence.is_active,
+            },
+            "filters": {
+                "timeframe": timeframe,
+                "applied": {
+                    "step": step_filter,
+                    "status": status_filter,
+                    "channel": channel_filter,
+                    "search": filters.get("search") or None,
+                },
+                "options": {
+                    "steps": step_options,
+                    "channels": channel_options,
+                    "statuses": [
+                        "engaged",
+                        "responded",
+                        "delivered",
+                        "queued",
+                        "failed",
+                        "sent",
+                        "completed",
+                    ],
+                },
+            },
+            "summary": {
+                "enrollment": {
+                    "total": total_enrolled,
+                    "active": active_enrollments,
+                    "paused": paused_enrollments,
+                    "completed": completed_enrollments,
+                    "failed": failed_enrollments,
+                    "converted": converted_enrollments,
+                    "conversion_rate": conversion_rate,
+                    "completion_rate": completion_rate,
+                    "emails_sent": emails_sent_total,
+                    "sms_sent": sms_sent_total,
+                    "calls_made": calls_made_total,
+                },
+                "delivery": filtered_delivery,
+                "overall_delivery": overall_delivery,
+                "channels": {
+                    "filtered": filtered_channel,
+                    "overall": overall_channel,
+                },
+            },
+            "automation_health": automation_health,
+            "steps": {
+                "filtered": filtered_step_metrics,
+                "overall": overall_step_metrics,
+            },
+            "engagements": {
+                "total": len(filtered_records),
+                "count": len(paginated_records),
+                "limit": limit,
+                "offset": offset,
+                "items": paginated_records,
+            },
         }
 
 class SequenceExecutor:

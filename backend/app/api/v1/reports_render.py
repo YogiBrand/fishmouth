@@ -51,7 +51,61 @@ async def render_report(report_id: str, body: RenderRequest, request: Request) -
         )
 
         if not report:
-            raise HTTPException(status_code=404, detail="Report not found")
+            if not body.html:
+                raise HTTPException(status_code=404, detail="Report not found")
+
+            checksum = content_checksum(body.html)
+            assets = render_pdf_and_preview(body.html, report_id, checksum[:16])
+            rendered_at = datetime.utcnow()
+
+            await db.execute(
+                sa.text(
+                    """
+                    INSERT INTO reports (id, type, status, pdf_url, preview_url, render_checksum, render_html_path, rendered_at, created_at, updated_at)
+                    VALUES (:id, :type, :status, :pdf_url, :preview_url, :checksum, :html_url, :rendered_at, :rendered_at, :rendered_at)
+                    ON CONFLICT (id) DO UPDATE SET
+                        pdf_url = EXCLUDED.pdf_url,
+                        preview_url = EXCLUDED.preview_url,
+                        render_checksum = EXCLUDED.render_checksum,
+                        render_html_path = EXCLUDED.render_html_path,
+                        rendered_at = EXCLUDED.rendered_at,
+                        updated_at = EXCLUDED.rendered_at
+                    """
+                ),
+                {
+                    "id": report_id,
+                    "type": "custom",
+                    "status": "rendered",
+                    "pdf_url": assets["pdf_url"],
+                    "preview_url": assets["preview_url"],
+                    "checksum": checksum,
+                    "html_url": assets["html_url"],
+                    "rendered_at": rendered_at,
+                },
+            )
+
+            event_payload = EventPayload(
+                type="report.rendered",
+                source_service="api.render",
+                report_id=report_id,
+                payload={
+                    "pdf_url": assets["pdf_url"],
+                    "preview_url": assets["preview_url"],
+                    "checksum": checksum,
+                },
+                request_id=_resolve_request_id(request),
+            )
+            emit_event(db.session, event_payload)
+            await db.commit()
+
+            return {
+                "pdf_url": assets["pdf_url"],
+                "preview_url": assets["preview_url"],
+                "checksum": checksum,
+                "html_url": assets["html_url"],
+                "rendered_at": rendered_at.isoformat(),
+                "cached": False,
+            }
 
         lead_payload: Optional[Dict[str, Any]] = None
         lead_id = report.get("lead_id")

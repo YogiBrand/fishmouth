@@ -14,6 +14,7 @@ from auth import get_current_user
 from database import SessionLocal
 from models import ScanJob, User
 from services.scan_job_service import ScanJobService
+from app.services.contagion_analyzer import ContagionAnalyzerService
 
 
 router = APIRouter(prefix="/api/v1/scans", tags=["scans"])
@@ -46,6 +47,11 @@ class ScanStatusResponse(BaseModel):
     budget_cents: int
     budget_spent_cents: int
     results: Optional[Dict[str, Any]] = None
+
+
+class ClusterQuery(BaseModel):
+    area_geojson: Dict[str, Any]
+    limit: int = Field(25, ge=1, le=200)
 
 
 def _geometry_kind(geojson_payload: Dict[str, Any]) -> str:
@@ -154,3 +160,25 @@ async def get_scan(scan_id: str, current_user: User = Depends(get_current_user))
         return _status(job)
     finally:
         session.close()
+
+
+@router.post("/clusters")
+async def scan_clusters(payload: ClusterQuery) -> Dict[str, Any]:
+    """Return contagion cluster insights for the supplied polygon/area."""
+
+    try:
+        geom = shape(payload.area_geojson)
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=400, detail="Invalid GeoJSON payload") from exc
+
+    if geom.is_empty:
+        return {"clusters": []}
+    if geom.geom_type not in {"Polygon", "MultiPolygon"}:
+        raise HTTPException(status_code=400, detail="Heatmap analysis expects a polygon area")
+
+    try:
+        clusters = await ContagionAnalyzerService.list_clusters_in_geometry(payload.area_geojson, limit=payload.limit)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    return {"clusters": clusters}

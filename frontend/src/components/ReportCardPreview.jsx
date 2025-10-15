@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { FileText, Eye, Edit, Share2, Download, Star, Layers, CheckCircle, Calendar, Building } from 'lucide-react';
+import { FileText, Eye, Edit, Star, Layers, CheckCircle, Calendar, Building } from 'lucide-react';
 
 const ReportCardPreview = ({ reportType, onSelect, selected = false }) => {
   const [hovering, setHovering] = useState(false);

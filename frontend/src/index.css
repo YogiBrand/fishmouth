@@ -125,6 +125,15 @@ code {
   }
 }
 
+@keyframes marquee {
+  0% {
+    transform: translateX(0);
+  }
+  100% {
+    transform: translateX(-50%);
+  }
+}
+
 .animate-pop {
   animation: celebration-pop 0.5s cubic-bezier(0.22, 1, 0.36, 1) forwards;
 }

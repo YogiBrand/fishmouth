@@ -1,33 +1,22 @@
 import React from 'react';
-export default function CallLogPanel({call}){
+
+export default function CallLogPanel({ call }) {
+  if (!call) return null;
   return (
-    <div className="space-y-3">
-      <div className="rounded border p-3">
-        <div className="flex justify-between">
-          <div>
-            <div className="font-semibold">Outcome: {call.outcome || '—'}</div>
-            <div className="text-xs text-gray-600">Duration: {call.duration}s • Talk/Listen: {call.talkRatio}</div>
-          </div>
-          <div className="text-xs text-gray-500">Sentiment: {call.sentiment}</div>
-        </div>
-        <div className="mt-2">
-          <div className="font-medium text-sm">Key moments</div>
-          <ul className="list-disc ml-5 text-xs">
-            {(call.keyMoments||[]).map((m,i)=>(<li key={i}>{m.time}s — {m.label}</li>))}
-          </ul>
-        </div>
-        <div className="mt-2">
-          <div className="font-medium text-sm">Next actions</div>
-          <div className="space-x-2">
-            <button className="btn-sm">Book Follow-up</button>
-            <button className="btn-sm">Send SMS Summary</button>
-          </div>
-        </div>
+    <div className="border rounded p-3">
+      <div className="text-sm opacity-60">Call #{call.id}</div>
+      <div className="mt-2 grid grid-cols-2 gap-2 text-sm">
+        <div>Disposition: <b>{call.outcome}</b></div>
+        <div>Talk/Listen: <b>{call.talk_ratio}</b></div>
+        <div>Silence %: <b>{call.silence_pct}</b></div>
+        <div>Sentiment: <b>{call.sentiment}</b></div>
       </div>
-      <div className="rounded border p-3">
-        <div className="font-medium text-sm mb-1">Transcript</div>
-        <pre className="text-xs whitespace-pre-wrap">{call.transcript || '—'}</pre>
+      <div className="mt-2">
+        <div className="font-semibold">Highlights</div>
+        <ul className="list-disc ml-5 text-sm">
+          {call.highlights?.map((h, i) => <li key={i}>{h}</li>)}
+        </ul>
       </div>
     </div>
-  )
+  );
 }

@@ -36,6 +36,7 @@ def _ensure_schema() -> None:
                 if engine.dialect.name != "sqlite"
                 else "ALTER TABLE users ADD COLUMN onboarding_state JSON NOT NULL DEFAULT '{}'"
             ),
+            "wallet_balance_cents": "ALTER TABLE users ADD COLUMN wallet_balance_cents INTEGER NOT NULL DEFAULT 0",
         }
         with engine.begin() as connection:
             for column_name, ddl in user_columns.items():
@@ -54,6 +55,10 @@ def _ensure_schema() -> None:
             "imagery_status": "ALTER TABLE leads ADD COLUMN imagery_status VARCHAR NOT NULL DEFAULT 'synthetic'",
             "property_enrichment_status": "ALTER TABLE leads ADD COLUMN property_enrichment_status VARCHAR NOT NULL DEFAULT 'synthetic'",
             "contact_enrichment_status": "ALTER TABLE leads ADD COLUMN contact_enrichment_status VARCHAR NOT NULL DEFAULT 'synthetic'",
+            "image_quality_score": "ALTER TABLE leads ADD COLUMN image_quality_score FLOAT",
+            "image_quality_issues": "ALTER TABLE leads ADD COLUMN image_quality_issues "
+            + ("JSONB" if engine.dialect.name == "postgresql" else "JSON"),
+            "quality_validation_status": "ALTER TABLE leads ADD COLUMN quality_validation_status VARCHAR DEFAULT 'pending'",
             "voice_opt_out": "ALTER TABLE leads ADD COLUMN voice_opt_out BOOLEAN NOT NULL DEFAULT 0",
             "voice_opt_out_reason": "ALTER TABLE leads ADD COLUMN voice_opt_out_reason VARCHAR",
             "voice_consent_updated_at": "ALTER TABLE leads ADD COLUMN voice_consent_updated_at DATETIME",
@@ -71,6 +76,10 @@ def _ensure_schema() -> None:
             "analysis_confidence": "ALTER TABLE leads ADD COLUMN analysis_confidence FLOAT",
             "overlay_url": "ALTER TABLE leads ADD COLUMN overlay_url VARCHAR(500)",
             "score_version": "ALTER TABLE leads ADD COLUMN score_version VARCHAR(20)",
+            "roof_intelligence": "ALTER TABLE leads ADD COLUMN roof_intelligence "
+            + ("JSONB" if engine.dialect.name == "postgresql" else "JSON"),
+            "street_view_quality": "ALTER TABLE leads ADD COLUMN street_view_quality "
+            + ("JSONB" if engine.dialect.name == "postgresql" else "JSON"),
         }
         with engine.begin() as connection:
             for column_name, ddl in lead_columns.items():
@@ -152,7 +161,7 @@ def _ensure_schema() -> None:
                 "id VARCHAR(36) PRIMARY KEY, "
                 "type VARCHAR(100) NOT NULL, "
                 "actor VARCHAR(255), "
-                "lead_id VARCHAR(64), "
+                "lead_id INTEGER, "
                 "report_id VARCHAR(64), "
                 "call_id VARCHAR(64), "
                 "source_service VARCHAR(100) NOT NULL, "
@@ -160,24 +169,30 @@ def _ensure_schema() -> None:
                 "request_id VARCHAR(128), "
                 "created_at DATETIME DEFAULT CURRENT_TIMESTAMP)"
             )
+            with engine.begin() as connection:
+                connection.execute(text(create_events_sql))
+                connection.execute(text("CREATE INDEX IF NOT EXISTS ix_events_created_at ON events (created_at)"))
+                connection.execute(text("CREATE INDEX IF NOT EXISTS ix_events_type ON events (type)"))
         else:
-            create_events_sql = (
-                "CREATE TABLE events ("
-                "id VARCHAR(36) PRIMARY KEY, "
-                "type VARCHAR(100) NOT NULL, "
-                "actor VARCHAR(255), "
-                "lead_id VARCHAR(64), "
-                "report_id VARCHAR(64), "
-                "call_id VARCHAR(64), "
-                "source_service VARCHAR(100) NOT NULL, "
-                "payload JSONB NOT NULL DEFAULT '{}'::jsonb, "
-                "request_id VARCHAR(128), "
-                "created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)"
-            )
-        with engine.begin() as connection:
-            connection.execute(text(create_events_sql))
-            connection.execute(text("CREATE INDEX IF NOT EXISTS ix_events_created_at ON events (created_at)"))
-            connection.execute(text("CREATE INDEX IF NOT EXISTS ix_events_type ON events (type)"))
+            with engine.begin() as connection:
+                connection.execute(text("CREATE EXTENSION IF NOT EXISTS pgcrypto"))
+                connection.execute(
+                    text(
+                        "CREATE TABLE events ("
+                        "id UUID PRIMARY KEY DEFAULT gen_random_uuid(), "
+                        "type TEXT NOT NULL, "
+                        "actor TEXT, "
+                        "lead_id INTEGER, "
+                        "report_id VARCHAR(64), "
+                        "call_id UUID, "
+                        "source_service TEXT NOT NULL, "
+                        "payload JSONB NOT NULL DEFAULT '{}'::jsonb, "
+                        "request_id TEXT, "
+                        "created_at TIMESTAMPTZ NOT NULL DEFAULT NOW())"
+                    )
+                )
+                connection.execute(text("CREATE INDEX IF NOT EXISTS idx_events_created_at ON events (created_at)"))
+                connection.execute(text("CREATE INDEX IF NOT EXISTS idx_events_type ON events (type)"))
 
     # -------------------- Public Shares table --------------------
     if "public_shares" not in tables:
@@ -192,20 +207,26 @@ def _ensure_schema() -> None:
                 "created_at DATETIME DEFAULT CURRENT_TIMESTAMP, "
                 "FOREIGN KEY(report_id) REFERENCES reports(id) ON DELETE CASCADE)"
             )
+            with engine.begin() as connection:
+                connection.execute(text(create_public_shares_sql))
+                connection.execute(text("CREATE INDEX IF NOT EXISTS ix_public_shares_report ON public_shares (report_id)"))
+                connection.execute(text("CREATE UNIQUE INDEX IF NOT EXISTS ix_public_shares_token ON public_shares (token)"))
         else:
-            create_public_shares_sql = (
-                "CREATE TABLE public_shares ("
-                "id VARCHAR(36) PRIMARY KEY, "
-                "report_id VARCHAR(64) NOT NULL REFERENCES reports(id) ON DELETE CASCADE, "
-                "token VARCHAR(32) NOT NULL UNIQUE, "
-                "expires_at TIMESTAMP, "
-                "revoked BOOLEAN NOT NULL DEFAULT FALSE, "
-                "created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)"
-            )
-        with engine.begin() as connection:
-            connection.execute(text(create_public_shares_sql))
-            connection.execute(text("CREATE INDEX IF NOT EXISTS ix_public_shares_report ON public_shares (report_id)"))
-            connection.execute(text("CREATE UNIQUE INDEX IF NOT EXISTS ix_public_shares_token ON public_shares (token)"))
+            with engine.begin() as connection:
+                connection.execute(text("CREATE EXTENSION IF NOT EXISTS pgcrypto"))
+                connection.execute(
+                    text(
+                        "CREATE TABLE public_shares ("
+                        "id UUID PRIMARY KEY DEFAULT gen_random_uuid(), "
+                        "report_id VARCHAR(64) NOT NULL REFERENCES reports(id) ON DELETE CASCADE, "
+                        "token CHAR(32) NOT NULL UNIQUE, "
+                        "expires_at TIMESTAMPTZ, "
+                        "revoked BOOLEAN NOT NULL DEFAULT FALSE, "
+                        "created_at TIMESTAMPTZ NOT NULL DEFAULT NOW())"
+                    )
+                )
+                connection.execute(text("CREATE INDEX IF NOT EXISTS idx_public_shares_report_id ON public_shares (report_id)"))
+                connection.execute(text("CREATE UNIQUE INDEX IF NOT EXISTS idx_public_shares_token ON public_shares (token)"))
 
     # -------------------- Scan Jobs table --------------------
     if "scan_jobs" not in tables:
@@ -467,11 +488,102 @@ def _ensure_schema() -> None:
                 "occurred_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP"
                 ")"
             )
-        with engine.begin() as connection:
-            connection.execute(text(create_events_sql))
-            connection.execute(text("CREATE INDEX IF NOT EXISTS ix_message_events_message_id ON message_events (message_id)"))
-            connection.execute(text("CREATE INDEX IF NOT EXISTS ix_message_events_type ON message_events (type)"))
+    with engine.begin() as connection:
+        connection.execute(text(create_events_sql))
+        connection.execute(text("CREATE INDEX IF NOT EXISTS ix_message_events_message_id ON message_events (message_id)"))
+        connection.execute(text("CREATE INDEX IF NOT EXISTS ix_message_events_type ON message_events (type)"))
 
+    # -------------------- Wallet promotions --------------------
+    if "wallet_promotions" not in tables:
+        if engine.dialect.name == "sqlite":
+            create_promotions_sql = (
+                "CREATE TABLE wallet_promotions ("
+                "id INTEGER PRIMARY KEY AUTOINCREMENT, "
+                "user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE, "
+                "code VARCHAR(32) NOT NULL UNIQUE, "
+                "multiplier REAL NOT NULL DEFAULT 1.0, "
+                "reward_type VARCHAR(64) NOT NULL, "
+                "trigger_source VARCHAR(64) NOT NULL, "
+                "status VARCHAR(32) NOT NULL DEFAULT 'active', "
+                "metadata JSON, "
+                "created_at DATETIME DEFAULT CURRENT_TIMESTAMP, "
+                "updated_at DATETIME DEFAULT CURRENT_TIMESTAMP, "
+                "expires_at DATETIME, "
+                "redeemed_at DATETIME, "
+                "locked_at DATETIME, "
+                "viewed_at DATETIME, "
+                "extension_count INTEGER NOT NULL DEFAULT 0, "
+                "triggered_level INTEGER, "
+                "extension_sent_at DATETIME, "
+                "last_notification_at DATETIME, "
+                "lock_amount REAL, "
+                "status_reason VARCHAR(200)"
+                ")"
+            )
+        else:
+            create_promotions_sql = (
+                "CREATE TABLE wallet_promotions ("
+                "id SERIAL PRIMARY KEY, "
+                "user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE, "
+                "code VARCHAR(32) NOT NULL UNIQUE, "
+                "multiplier REAL NOT NULL DEFAULT 1.0, "
+                "reward_type VARCHAR(64) NOT NULL, "
+                "trigger_source VARCHAR(64) NOT NULL, "
+                "status VARCHAR(32) NOT NULL DEFAULT 'active', "
+                "metadata JSONB, "
+                "created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, "
+                "updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, "
+                "expires_at TIMESTAMP, "
+                "redeemed_at TIMESTAMP, "
+                "locked_at TIMESTAMP, "
+                "viewed_at TIMESTAMP, "
+                "extension_count INTEGER NOT NULL DEFAULT 0, "
+                "triggered_level INTEGER, "
+                "extension_sent_at TIMESTAMP, "
+                "last_notification_at TIMESTAMP, "
+                "lock_amount DOUBLE PRECISION, "
+                "status_reason VARCHAR(200)"
+                ")"
+            )
+        with engine.begin() as connection:
+            connection.execute(text(create_promotions_sql))
+            connection.execute(text("CREATE UNIQUE INDEX IF NOT EXISTS ix_wallet_promotions_code ON wallet_promotions (code)"))
+            connection.execute(text("CREATE INDEX IF NOT EXISTS ix_wallet_promotions_user ON wallet_promotions (user_id)"))
+            connection.execute(text("CREATE INDEX IF NOT EXISTS ix_wallet_promotions_status ON wallet_promotions (status)"))
+    else:
+        existing_promotions = {column["name"] for column in inspector.get_columns("wallet_promotions")}
+        metadata_column = (
+            "ALTER TABLE wallet_promotions ADD COLUMN metadata JSONB"
+            if engine.dialect.name != "sqlite"
+            else "ALTER TABLE wallet_promotions ADD COLUMN metadata JSON"
+        )
+        promotions_columns = {
+            "trigger_source": "ALTER TABLE wallet_promotions ADD COLUMN trigger_source VARCHAR(64) NOT NULL DEFAULT 'level_up'",
+            "status": "ALTER TABLE wallet_promotions ADD COLUMN status VARCHAR(32) NOT NULL DEFAULT 'active'",
+            "metadata": metadata_column,
+            "extension_count": "ALTER TABLE wallet_promotions ADD COLUMN extension_count INTEGER NOT NULL DEFAULT 0",
+            "triggered_level": "ALTER TABLE wallet_promotions ADD COLUMN triggered_level INTEGER",
+            "extension_sent_at": "ALTER TABLE wallet_promotions ADD COLUMN extension_sent_at DATETIME",
+            "last_notification_at": "ALTER TABLE wallet_promotions ADD COLUMN last_notification_at DATETIME",
+            "lock_amount": "ALTER TABLE wallet_promotions ADD COLUMN lock_amount REAL",
+            "status_reason": "ALTER TABLE wallet_promotions ADD COLUMN status_reason VARCHAR(200)",
+            "viewed_at": "ALTER TABLE wallet_promotions ADD COLUMN viewed_at DATETIME",
+            "locked_at": "ALTER TABLE wallet_promotions ADD COLUMN locked_at DATETIME",
+            "redeemed_at": "ALTER TABLE wallet_promotions ADD COLUMN redeemed_at DATETIME",
+            "expires_at": "ALTER TABLE wallet_promotions ADD COLUMN expires_at DATETIME",
+        }
+        if engine.dialect.name != "sqlite":
+            promotions_columns["lock_amount"] = "ALTER TABLE wallet_promotions ADD COLUMN lock_amount DOUBLE PRECISION"
+            promotions_columns["extension_sent_at"] = "ALTER TABLE wallet_promotions ADD COLUMN extension_sent_at TIMESTAMP"
+            promotions_columns["last_notification_at"] = "ALTER TABLE wallet_promotions ADD COLUMN last_notification_at TIMESTAMP"
+            promotions_columns["viewed_at"] = "ALTER TABLE wallet_promotions ADD COLUMN viewed_at TIMESTAMP"
+            promotions_columns["locked_at"] = "ALTER TABLE wallet_promotions ADD COLUMN locked_at TIMESTAMP"
+            promotions_columns["redeemed_at"] = "ALTER TABLE wallet_promotions ADD COLUMN redeemed_at TIMESTAMP"
+            promotions_columns["expires_at"] = "ALTER TABLE wallet_promotions ADD COLUMN expires_at TIMESTAMP"
+        with engine.begin() as connection:
+            for column_name, ddl in promotions_columns.items():
+                if column_name not in existing_promotions:
+                    connection.execute(text(ddl))
     # -------------------- Contractor prospects --------------------
     if "contractor_prospects" not in tables:
         if engine.dialect.name == "sqlite":
@@ -585,6 +697,63 @@ def _ensure_schema() -> None:
             connection.execute(text("CREATE INDEX IF NOT EXISTS ix_message_events_message_id ON message_events (message_id)"))
             connection.execute(text("CREATE INDEX IF NOT EXISTS ix_message_events_type ON message_events (type)"))
             connection.execute(text("CREATE UNIQUE INDEX IF NOT EXISTS ix_public_shares_token ON public_shares (token)"))
+
+    if "marketing_signups" not in tables:
+        with engine.begin() as connection:
+            if engine.dialect.name == "sqlite":
+                connection.execute(
+                    text(
+                        """
+                        CREATE TABLE marketing_signups (
+                            id TEXT PRIMARY KEY,
+                            name TEXT NOT NULL,
+                            email TEXT NOT NULL,
+                            phone TEXT,
+                            company TEXT NOT NULL,
+                            city TEXT,
+                            state TEXT,
+                            country TEXT,
+                            source TEXT,
+                            medium TEXT,
+                            campaign TEXT,
+                            notes TEXT,
+                            ip TEXT,
+                            user_agent TEXT,
+                            created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+                        )
+                        """
+                    )
+                )
+            else:
+                connection.execute(text("CREATE EXTENSION IF NOT EXISTS pgcrypto"))
+                connection.execute(
+                    text(
+                        """
+                        CREATE TABLE marketing_signups (
+                            id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                            name TEXT NOT NULL,
+                            email TEXT NOT NULL,
+                            phone TEXT,
+                            company TEXT NOT NULL,
+                            city TEXT,
+                            state TEXT,
+                            country TEXT,
+                            source TEXT,
+                            medium TEXT,
+                            campaign TEXT,
+                            notes TEXT,
+                            ip INET,
+                            user_agent TEXT,
+                            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                        )
+                        """
+                    )
+                )
+            connection.execute(
+                text(
+                    "CREATE INDEX IF NOT EXISTS idx_marketing_signups_created_at ON marketing_signups (created_at)"
+                )
+            )
 
 
 try:

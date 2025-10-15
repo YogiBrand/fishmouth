@@ -64,17 +64,41 @@ async def _enforce_consent_and_collect_warnings(db: DatabaseSession, req: Outbox
 
     channel = req.channel
     if record.get("dnc"):
-        warnings.append("Lead is marked do-not-contact; confirm before sending.")
+        raise HTTPException(status_code=403, detail="Lead is flagged do-not-contact")
     if channel == "email" and not record.get("consent_email"):
-        warnings.append("Lead has not granted email consent.")
+        raise HTTPException(status_code=403, detail="Email consent not granted")
     if channel == "sms" and not record.get("consent_sms"):
-        warnings.append("Lead has not granted SMS consent.")
+        raise HTTPException(status_code=403, detail="SMS consent not granted")
 
     if record.get("voice_opt_out"):
         warnings.append("Lead has voice opt-out enabled; avoid manual calls.")
     if record.get("contact_enrichment_status") == "failed":
         warnings.append("Lead contact enrichment failed; verify consent before sending.")
     return warnings
+
+
+async def _guard_against_duplicates(db: DatabaseSession, req: OutboxSendRequest) -> None:
+    context = req.context or {}
+    lead_id = context.get("lead_id")
+    if not lead_id:
+        return
+
+    lead_id_str = str(lead_id)
+    duplicate = await db.fetch_one(
+        sa.text(
+            """
+            SELECT id
+            FROM outbox_messages
+            WHERE channel = :channel
+              AND payload->'context'->>'lead_id' = :lead_id
+              AND status IN ('queued', 'sending', 'sent')
+            LIMIT 1
+            """
+        ),
+        {"channel": req.channel, "lead_id": lead_id_str},
+    )
+    if duplicate:
+        raise HTTPException(status_code=409, detail="Message already queued or sent for this lead")
 
 
 @router.post("/send", response_model=OutboxSendResponse)
@@ -93,6 +117,7 @@ async def send_outbox_message(req: OutboxSendRequest, db: DatabaseSession = Depe
         raise HTTPException(status_code=400, detail="Unsupported channel")
 
     warnings = await _enforce_consent_and_collect_warnings(db, req)
+    await _guard_against_duplicates(db, req)
     await db.close()
 
     result = queue_outbox_message(

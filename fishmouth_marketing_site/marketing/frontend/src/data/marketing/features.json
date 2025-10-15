@@ -1,0 +1,32 @@
+[
+  {
+    "title": "Leads that pick up",
+    "desc": "Verified contacts with consent & deliverability baked in.",
+    "icon": "\ud83d\udcde"
+  },
+  {
+    "title": "Proof in the report",
+    "desc": "Imagery overlays & reasons homeowners can see.",
+    "icon": "\ud83d\udef0\ufe0f"
+  },
+  {
+    "title": "Auto follow\u2011ups",
+    "desc": "Email/SMS sequences triggered by real actions.",
+    "icon": "\ud83d\udd01"
+  },
+  {
+    "title": "Low cost to start",
+    "desc": "Free imagery first, upgrade only when needed.",
+    "icon": "\ud83d\udcb8"
+  },
+  {
+    "title": "Your brand, your voice",
+    "desc": "Reports and messages carry your logo & tone.",
+    "icon": "\ud83c\udff7\ufe0f"
+  },
+  {
+    "title": "Appointments booked",
+    "desc": "From first ping to set appointment in 2\u20133 steps.",
+    "icon": "\ud83d\udcc6"
+  }
+]

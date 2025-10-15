@@ -1,17 +1,14 @@
-# boost/backend/app/api/v1/events.py
-from fastapi import APIRouter, Request, Depends
+from fastapi import APIRouter
 from pydantic import BaseModel
-from typing import Optional, Dict, Any
+from typing import Dict, Any
+from boost.backend.lib.events import emit_event
+
 router = APIRouter(prefix="/api/v1/events", tags=["events"])
 
 class ClientEvent(BaseModel):
     type: str
-    lead_id: Optional[str] = None
-    report_id: Optional[str] = None
-    payload: Dict[str, Any] = {}
+    payload: Dict[str, Any]
 
-@router.post("")
-async def ingest(ev: ClientEvent, request: Request):
-    req_id = request.headers.get("X-Request-ID")
-    # TODO: insert into events table
-    return {"ok": True, "request_id": req_id}
+@router.post("/client")
+def client_event(ev: ClientEvent):
+    return emit_event(ev.type, ev.payload)

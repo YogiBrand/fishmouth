@@ -1,17 +1,19 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import {
-  FileText, Download, Share, Eye, Palette, Settings, 
-  Image, BarChart3, Star, Award, CheckCircle, Calendar,
-  MapPin, DollarSign, Users, TrendingUp, Target, Zap,
-  Phone, Mail, Globe, Printer, Copy, ExternalLink,
-  Loader, RefreshCw, Maximize2, Home, Camera, Edit3,
-  Save, Send, ArrowLeft, Plus, Trash2, AlertCircle,
-  Sparkles, BookOpen, MessageSquare, ChevronDown,
-  ChevronUp, PaintBucket, Type, Layout, X
+  Star,
+  CheckCircle,
+  Target,
+  Loader,
+  RefreshCw,
+  Save,
+  Send,
+  ArrowLeft,
+  AlertCircle,
+  Sparkles,
+  X
 } from 'lucide-react';
 import { useNavigate, useParams } from 'react-router-dom';
 import html2canvas from 'html2canvas';
-import jsPDF from 'jspdf';
 import toast from 'react-hot-toast';
 import ReportCardPreview from './ReportCardPreview';
 import VariablePicker from './VariablePicker';
@@ -27,7 +29,6 @@ const EnhancedReportGenerator = ({ lead: initialLead, businessProfile, onClose, 
   const navigate = useNavigate();
   const { reportId } = useParams();
   const [step, setStep] = useState(initialLead?.id ? 'type-selection' : 'lead-selection'); // lead-selection, type-selection, customization, preview
-  const [reportData, setReportData] = useState(null);
   const [loading, setLoading] = useState(false);
   const [aiGenerating, setAiGenerating] = useState(false);
   const [imageQualityResults, setImageQualityResults] = useState({});
@@ -51,7 +52,7 @@ const EnhancedReportGenerator = ({ lead: initialLead, businessProfile, onClose, 
         return [initialLead, ...prev];
       });
     }
-  }, [initialLead?.id]);
+  }, [initialLead]);
 
   const computeLeadScore = useCallback((candidate) => {
     if (!candidate) return 0;
@@ -220,9 +221,9 @@ const EnhancedReportGenerator = ({ lead: initialLead, businessProfile, onClose, 
     if (visible) {
       loadBusinessData();
     }
-  }, [visible, lead?.id]);
+  }, [visible, lead]);
 
-  const reportTypes = [
+  const reportTypes = useMemo(() => [
     {
       id: 'damage-assessment',
       title: 'Roof Damage Assessment',
@@ -235,7 +236,7 @@ const EnhancedReportGenerator = ({ lead: initialLead, businessProfile, onClose, 
       id: 'inspection-report',
       title: 'Property Inspection Report',
       description: 'Detailed inspection findings and maintenance recommendations',
-      icon: Eye,
+      icon: CheckCircle,
       color: 'blue',
       sections: ['executive_summary', 'property_overview', 'inspection_findings', 'recommendations', 'maintenance_schedule', 'company_profile']
     },
@@ -255,9 +256,9 @@ const EnhancedReportGenerator = ({ lead: initialLead, businessProfile, onClose, 
       color: 'purple',
       sections: ['executive_summary', 'project_overview', 'challenges', 'solutions', 'before_after_gallery', 'customer_story', 'results', 'company_profile']
     }
-  ];
+  ], []);
 
-  const sectionTemplates = {
+  const sectionTemplates = useMemo(() => ({
     executive_summary: {
       title: 'Executive Summary',
       description: 'AI-generated overview of findings and recommendations',
@@ -300,7 +301,7 @@ const EnhancedReportGenerator = ({ lead: initialLead, businessProfile, onClose, 
       aiPrompt: 'Create a clear "next steps" section that guides the homeowner through the process of moving forward. Include consultation booking, timeline expectations, and what to expect.',
       placeholder: 'Ready to move forward? Here\'s what happens next...'
     }
-  };
+  }), []);
 
   // Generate AI content for a specific section
   const generateAIContent = useCallback(async (sectionId, customPrompt = null) => {
@@ -348,7 +349,7 @@ const EnhancedReportGenerator = ({ lead: initialLead, businessProfile, onClose, 
     } finally {
       setAiGenerating(false);
     }
-  }, [lead, businessProfile, reportConfig.type]);
+  }, [lead, businessProfile, reportConfig.type, sectionTemplates, businessServices, validatedImages]);
 
   // Initialize report if editing existing
   useEffect(() => {
@@ -363,7 +364,6 @@ const EnhancedReportGenerator = ({ lead: initialLead, businessProfile, onClose, 
       const response = await fetch(`/api/v1/reports/${id}`);
       if (response.ok) {
         const data = await response.json();
-        setReportData(data);
         setReportConfig(data.config);
         setAiContent(data.content || {});
 
@@ -431,7 +431,6 @@ const EnhancedReportGenerator = ({ lead: initialLead, businessProfile, onClose, 
         }
 
         const data = await response.json();
-        setReportData(data);
         setAiContent(data.content || resolvedReportContent);
 
         if (!isEditing && data?.id) {
@@ -476,8 +475,6 @@ const EnhancedReportGenerator = ({ lead: initialLead, businessProfile, onClose, 
         });
         
         if (response.ok) {
-          const data = await response.json();
-          
           try {
             await fetch(`/api/v1/reports/${savedReport.id}/share`, {
               method: 'POST'
@@ -864,7 +861,7 @@ const EnhancedReportGenerator = ({ lead: initialLead, businessProfile, onClose, 
                                   <div className="aspect-square bg-gray-100 rounded-lg overflow-hidden">
                                     <img
                                       src={image.url || '/api/placeholder/100/100'}
-                                      alt={`Validated image ${index + 1}`}
+                                      alt={`Validated roof view ${index + 1}`}
                                       className="w-full h-full object-cover"
                                     />
                                   </div>

@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import Map, { Layer, Marker, Source } from 'react-map-gl';
-import 'mapbox-gl/dist/mapbox-gl.css';
+import Map, { Layer, Marker, Source } from 'react-map-gl/maplibre';
+import maplibregl from 'maplibre-gl';
+import 'maplibre-gl/dist/maplibre-gl.css';
 import {
   AlertTriangle,
   ArrowLeft,
@@ -16,12 +17,16 @@ import {
   RefreshCw,
   ShieldCheck,
   Trash2,
+  Flame,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 
 import { leadAPI } from '../services/api';
 
 const MAPBOX_TOKEN = process.env.REACT_APP_MAPBOX_TOKEN || '';
+const BASE_MAP_STYLE = MAPBOX_TOKEN
+  ? `https://api.mapbox.com/styles/v1/mapbox/satellite-streets-v12?access_token=${MAPBOX_TOKEN}`
+  : 'https://basemaps.cartocdn.com/gl/positron-gl-style/style.json';
 
 const normalizePolygonPoints = (points) => {
   if (!Array.isArray(points)) {
@@ -115,6 +120,63 @@ const circleToGeoJson = (center, radiusMiles) => {
   };
 };
 
+const ensureValidPolygonFeature = (feature) => {
+  if (!feature || feature.type !== 'Feature') {
+    return null;
+  }
+
+  const geometry = feature.geometry;
+  if (!geometry || geometry.type !== 'Polygon') {
+    return null;
+  }
+
+  const rings = Array.isArray(geometry.coordinates) ? geometry.coordinates : null;
+  if (!rings || !Array.isArray(rings[0]) || rings[0].length < 3) {
+    return null;
+  }
+
+  const sanitizedRing = [];
+  for (const pair of rings[0]) {
+    if (!Array.isArray(pair) || pair.length < 2) {
+      return null;
+    }
+    const lon = Number(pair[0]);
+    const lat = Number(pair[1]);
+    if (!Number.isFinite(lon) || !Number.isFinite(lat)) {
+      return null;
+    }
+    sanitizedRing.push([parseFloat(lon.toFixed(6)), parseFloat(lat.toFixed(6))]);
+  }
+
+  if (sanitizedRing.length < 3) {
+    return null;
+  }
+
+  const uniqueKeyCount = new Set(sanitizedRing.map((pair) => `${pair[0]},${pair[1]}`)).size;
+  if (uniqueKeyCount < 3) {
+    return null;
+  }
+
+  const [firstLon, firstLat] = sanitizedRing[0];
+  const [lastLon, lastLat] = sanitizedRing[sanitizedRing.length - 1];
+  if (firstLon !== lastLon || firstLat !== lastLat) {
+    sanitizedRing.push([firstLon, firstLat]);
+  }
+
+  if (sanitizedRing.length < 4) {
+    return null;
+  }
+
+  return {
+    type: 'Feature',
+    geometry: {
+      type: 'Polygon',
+      coordinates: [sanitizedRing],
+    },
+    properties: feature.properties || {},
+  };
+};
+
 const defaultPolicy = {
   order: ['naip', 'mapbox', 'google'],
   qualityThreshold: 0.4,
@@ -158,7 +220,7 @@ const formatCurrency = (value) => {
   return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(value);
 };
 
-const ScanWizard = ({ onScanCreated, isDark = false }) => {
+const ScanWizard = ({ onScanCreated, onClustersGenerated, isDark = false }) => {
   const [activeStep, setActiveStep] = useState(0);
   const [areaType, setAreaType] = useState('polygon');
   const [polygonPoints, setPolygonPoints] = useState([]);
@@ -173,16 +235,17 @@ const ScanWizard = ({ onScanCreated, isDark = false }) => {
   const [enrichment, setEnrichment] = useState(defaultEnrichment);
   const [budgetUsd, setBudgetUsd] = useState(25);
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [job, setJob] = useState(null);
   const [jobStatus, setJobStatus] = useState(null);
   const [jobResults, setJobResults] = useState(null);
   const [isPolling, setIsPolling] = useState(false);
   const pollingRef = useRef(null);
   const [searchTerm, setSearchTerm] = useState('Austin, TX');
   const [viewState, setViewState] = useState(initialViewState);
+  const mapRef = useRef(null);
   const [centerPoint, setCenterPoint] = useState(null);
   const [radiusMiles, setRadiusMiles] = useState(10);
   const [isLocating, setIsLocating] = useState(false);
+  const [clusterInsights, setClusterInsights] = useState({ loading: false, error: null, clusters: [] });
 
   useEffect(() => () => {
     if (pollingRef.current) {
@@ -191,15 +254,90 @@ const ScanWizard = ({ onScanCreated, isDark = false }) => {
   }, []);
 
   const polygonPointsSafe = useMemo(() => normalizePolygonPoints(polygonPoints), [polygonPoints]);
-  const polygonGeoJson = useMemo(() => polygonToGeoJson(polygonPointsSafe), [polygonPointsSafe]);
+  const polygonGeoJson = useMemo(
+    () => ensureValidPolygonFeature(polygonToGeoJson(polygonPointsSafe)),
+    [polygonPointsSafe]
+  );
   const centerGeoJson = useMemo(() => {
     if (areaType !== 'center' || !centerPoint) {
       return null;
     }
-    return circleToGeoJson(centerPoint, radiusMiles);
+    return ensureValidPolygonFeature(circleToGeoJson(centerPoint, radiusMiles));
   }, [areaType, centerPoint, radiusMiles]);
 
+  const bboxGeoJson = useMemo(() => {
+    if (areaType !== 'bbox') {
+      return null;
+    }
+    const values = [bbox.minLon, bbox.minLat, bbox.maxLon, bbox.maxLat].map((value) => Number(value));
+    if (values.some((value) => !Number.isFinite(value))) {
+      return null;
+    }
+    const [minLon, minLat, maxLon, maxLat] = values;
+    if (minLon >= maxLon || minLat >= maxLat) {
+      return null;
+    }
+    const coordinates = [
+      [minLon, minLat],
+      [maxLon, minLat],
+      [maxLon, maxLat],
+      [minLon, maxLat],
+      [minLon, minLat],
+    ];
+    return {
+      type: 'Feature',
+      geometry: {
+        type: 'Polygon',
+        coordinates: [coordinates],
+      },
+    };
+  }, [areaType, bbox]);
+
+  const clusterGeoJson = useMemo(() => {
+    if (areaType === 'polygon') {
+      return polygonGeoJson;
+    }
+    if (areaType === 'center') {
+      return centerGeoJson;
+    }
+    if (areaType === 'bbox') {
+      return bboxGeoJson;
+    }
+    return null;
+  }, [areaType, polygonGeoJson, centerGeoJson, bboxGeoJson]);
+
   const budgetCents = Math.round(Math.max(0, parseFloat(budgetUsd || 0) * 100));
+
+  const handleMapMove = useCallback((event) => {
+    setViewState(event.viewState);
+  }, []);
+
+  const moveMapTo = useCallback(
+    (latitude, longitude, options = {}) => {
+      if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) {
+        return;
+      }
+      const lat = parseFloat(latitude.toFixed(6));
+      const lon = parseFloat(longitude.toFixed(6));
+      const nextZoom = Number.isFinite(options.zoom) ? options.zoom : undefined;
+      setViewState((prev) => ({
+        ...prev,
+        latitude: lat,
+        longitude: lon,
+        ...(Number.isFinite(nextZoom) ? { zoom: nextZoom } : {}),
+      }));
+      const map = mapRef.current?.getMap?.();
+      if (map) {
+        map.flyTo({
+          center: [lon, lat],
+          ...(Number.isFinite(nextZoom) ? { zoom: nextZoom } : {}),
+          duration: options.duration ?? 800,
+          essential: true,
+        });
+      }
+    },
+    []
+  );
 
   useEffect(() => {
     if (areaType === 'center' && !centerPoint) {
@@ -241,7 +379,7 @@ const ScanWizard = ({ onScanCreated, isDark = false }) => {
 
       if (areaType === 'center') {
         setCenterPoint(normalizedPoint);
-        setViewState((prev) => ({ ...prev, latitude: normalizedPoint.latitude, longitude: normalizedPoint.longitude }));
+        moveMapTo(normalizedPoint.latitude, normalizedPoint.longitude, { duration: 600 });
         return;
       }
 
@@ -255,7 +393,7 @@ const ScanWizard = ({ onScanCreated, isDark = false }) => {
         });
       }
     },
-    [activeStep, areaType]
+    [activeStep, areaType, moveMapTo]
   );
 
   const removeLastPoint = () => {
@@ -391,7 +529,6 @@ const ScanWizard = ({ onScanCreated, isDark = false }) => {
       return;
     }
     setIsSubmitting(true);
-    setJob(null);
     setJobStatus(null);
     setJobResults(null);
     try {
@@ -404,7 +541,6 @@ const ScanWizard = ({ onScanCreated, isDark = false }) => {
         budget_cents: budgetCents,
       };
       const jobResponse = await leadAPI.createScanJob(payload);
-      setJob(jobResponse);
       toast.success('Scan job queued. We will fetch imagery shortly.');
       onScanCreated?.(jobResponse);
       pollJob(jobResponse.id);
@@ -460,7 +596,10 @@ const ScanWizard = ({ onScanCreated, isDark = false }) => {
         return;
       }
       const [lon, lat] = feature.center;
-      setViewState((prev) => ({ ...prev, latitude: lat, longitude: lon }));
+      const currentZoom = Number.isFinite(viewState?.zoom) ? viewState.zoom : initialViewState.zoom;
+      const minimumZoom = areaType === 'center' ? 13 : 11;
+      const targetZoom = Number.isFinite(currentZoom) ? Math.max(currentZoom, minimumZoom) : minimumZoom;
+      moveMapTo(lat, lon, { zoom: targetZoom });
       if (areaType === 'bbox') {
         const bboxData = feature.bbox || [lon - 0.05, lat - 0.05, lon + 0.05, lat + 0.05];
         setBbox({ minLon: bboxData[0], minLat: bboxData[1], maxLon: bboxData[2], maxLat: bboxData[3] });
@@ -493,12 +632,7 @@ const ScanWizard = ({ onScanCreated, isDark = false }) => {
         };
         setCenterPoint(normalized);
         setAreaType('center');
-        setViewState((prev) => ({
-          ...prev,
-          latitude: normalized.latitude,
-          longitude: normalized.longitude,
-          zoom: Math.max(prev.zoom, 13),
-        }));
+        moveMapTo(normalized.latitude, normalized.longitude, { zoom: Math.max(viewState?.zoom || 0, 13) });
         setIsLocating(false);
         toast.success('Centered map on your current location.');
       },
@@ -512,7 +646,32 @@ const ScanWizard = ({ onScanCreated, isDark = false }) => {
       },
       { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
     );
-  }, [setAreaType, setCenterPoint, setViewState]);
+    }, [moveMapTo, setAreaType, setCenterPoint, viewState.zoom]);
+
+  const handleClusterAnalysis = useCallback(async () => {
+    if (!clusterGeoJson) {
+      toast.error('Draw an area before running cluster analysis.');
+      return;
+    }
+    setClusterInsights({ loading: true, error: null, clusters: [] });
+    try {
+      const result = await leadAPI.getScanClusters({ area_geojson: clusterGeoJson, limit: 25 });
+      const clusters = result?.clusters || [];
+      setClusterInsights({ loading: false, error: null, clusters });
+      if (clusters.length) {
+        onClustersGenerated?.(clusters);
+      }
+      if (clusters.length === 0) {
+        toast('No active roof work clusters detected in this area.');
+      } else {
+        toast.success(`Found ${clusters.length} high-activity cluster${clusters.length === 1 ? '' : 's'}.`);
+      }
+    } catch (error) {
+      console.error('Failed to fetch cluster insights', error);
+      setClusterInsights({ loading: false, error: 'Unable to fetch cluster insights', clusters: [] });
+      toast.error('Unable to fetch cluster insights right now.');
+    }
+  }, [clusterGeoJson, onClustersGenerated]);
 
   const summaryItems = useMemo(() => {
     const items = [
@@ -582,12 +741,12 @@ const ScanWizard = ({ onScanCreated, isDark = false }) => {
             <div className="lg:col-span-2 space-y-4">
               <div className={`overflow-hidden rounded-2xl border ${isDark ? 'border-slate-700 bg-slate-900/70' : 'border-gray-200 bg-white'}`}>
                 <Map
-                  mapboxAccessToken={MAPBOX_TOKEN || undefined}
+                  ref={mapRef}
+                  mapLib={maplibregl}
                   initialViewState={initialViewState}
-                  {...viewState}
                   style={{ width: '100%', height: 360 }}
-                  mapStyle="mapbox://styles/mapbox/satellite-streets-v12"
-                  onMove={(event) => setViewState(event.viewState)}
+                  mapStyle={BASE_MAP_STYLE}
+                  onMove={handleMapMove}
                   onClick={handleMapClick}
                 >
                   {centerGeoJson && (
@@ -630,6 +789,22 @@ const ScanWizard = ({ onScanCreated, isDark = false }) => {
                       <div className="bg-blue-600 text-white text-xs rounded-full px-2 py-1 shadow">{index + 1}</div>
                     </Marker>
                   ))}
+                  {clusterInsights.clusters?.map((cluster, index) => {
+                    const lat = Number(cluster?.center_latitude);
+                    const lon = Number(cluster?.center_longitude);
+                    if (!Number.isFinite(lat) || !Number.isFinite(lon)) {
+                      return null;
+                    }
+                    return (
+                      <Marker key={`cluster-${cluster?.id || index}`} latitude={lat} longitude={lon}>
+                        <div className="flex flex-col items-center text-xs">
+                          <div className="rounded-full bg-orange-500 px-2 py-1 text-white shadow">
+                            Hotspot
+                          </div>
+                        </div>
+                      </Marker>
+                    );
+                  })}
                 </Map>
               </div>
 
@@ -804,7 +979,7 @@ const ScanWizard = ({ onScanCreated, isDark = false }) => {
             <div className={`space-y-4 ${isDark ? 'text-slate-200' : 'text-gray-700'}`}>
               <form onSubmit={handleSearchSubmit} className="space-y-3">
                 <label className="text-sm font-medium block">Search ZIP, city, or county</label>
-                <div className="flex flex-wrap gap-2">
+                <div className="flex gap-2">
                   <input
                     type="text"
                     value={searchTerm}
@@ -848,6 +1023,85 @@ const ScanWizard = ({ onScanCreated, isDark = false }) => {
                   <li>Use a tighter spacing (0.01) for dense neighbourhood scans.</li>
                   <li>Bounding boxes are faster but may include non-target parcels.</li>
                 </ul>
+              </div>
+
+              <div className={`rounded-2xl border p-4 text-sm ${isDark ? 'border-amber-700/40 bg-amber-950/40 text-amber-100' : 'border-amber-200 bg-amber-50 text-amber-900'}`}>
+                <h4 className="font-semibold mb-2 flex items-center gap-2">
+                  <Flame size={16} className="text-amber-500" /> Heatmap cluster insights
+                </h4>
+                <p className="text-xs mb-3">
+                  Spot storm repair hotspots and active permit clusters scraped from municipal sources within your selection. Pair this with SmartScans to focus crews where the action is.
+                </p>
+                <button
+                  type="button"
+                  onClick={handleClusterAnalysis}
+                  disabled={clusterInsights.loading || !clusterGeoJson}
+                  className={`inline-flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium transition-colors ${
+                    clusterInsights.loading || !clusterGeoJson
+                      ? 'cursor-not-allowed bg-amber-200 text-amber-500'
+                      : 'bg-amber-500 text-white hover:bg-amber-600'
+                  }`}
+                >
+                  {clusterInsights.loading ? <Loader2 size={16} className="animate-spin" /> : <Flame size={16} />}
+                  {clusterInsights.loading ? 'Analyzing…' : 'Analyze clusters'}
+                </button>
+                {!clusterGeoJson && (
+                  <p className="mt-2 text-xs text-amber-600">
+                    Draw or select an area to enable cluster analysis.
+                  </p>
+                )}
+                {clusterInsights.error && (
+                  <p className="mt-2 text-xs text-red-500">{clusterInsights.error}</p>
+                )}
+                {clusterInsights.clusters && clusterInsights.clusters.length > 0 && (
+                  <div className="mt-3 space-y-2 max-h-64 overflow-y-auto pr-1">
+                    {clusterInsights.clusters.map((cluster, index) => {
+                      const badgeClass = (() => {
+                        const status = (cluster.cluster_status || '').toLowerCase();
+                        if (status === 'hot') return 'bg-red-500 text-white';
+                        if (status === 'active') return 'bg-emerald-500 text-white';
+                        if (status === 'warming') return 'bg-amber-400 text-slate-900';
+                        return 'bg-slate-500 text-white';
+                      })();
+                      const updatedAt = cluster.date_range_end || cluster.last_scored_at;
+                      const formattedDate = updatedAt ? new Date(updatedAt).toLocaleDateString() : 'recent';
+                      const sampleAddresses = cluster.metadata?.sample_addresses || cluster.metadata?.all_subdivisions || [];
+                      return (
+                        <div key={cluster.id || index} className={`rounded-xl border px-3 py-2 ${isDark ? 'border-amber-600/40 bg-amber-900/30' : 'border-amber-200 bg-white'}`}>
+                          <div className="flex items-center justify-between gap-2">
+                            <div>
+                              <div className="text-sm font-semibold">
+                                {cluster.city || 'Unknown'}, {cluster.state || '—'}
+                              </div>
+                              <div className="text-xs text-amber-700 dark:text-amber-200">
+                                Score {Number(cluster.cluster_score || 0).toFixed(1)} • {cluster.permit_count || 0} permits
+                              </div>
+                            </div>
+                            <span className={`rounded-full px-2 py-1 text-[10px] font-semibold uppercase ${badgeClass}`}>
+                              {cluster.cluster_status || 'unknown'}
+                            </span>
+                          </div>
+                          <div className="mt-2 text-xs text-amber-700 dark:text-amber-100 flex flex-wrap gap-x-4 gap-y-1">
+                            <span>Latest activity: {formattedDate}</span>
+                            {cluster.avg_permit_value && (
+                              <span>Avg permit ${Number(cluster.avg_permit_value).toLocaleString()}</span>
+                            )}
+                          </div>
+                          {sampleAddresses.length > 0 && (
+                            <div className="mt-2 text-xs text-amber-700 dark:text-amber-100">
+                              <span className="font-semibold">Sample addresses:</span>
+                              <ul className="mt-1 list-disc list-inside space-y-1">
+                                {sampleAddresses.slice(0, 3).map((address, addrIdx) => (
+                                  <li key={addrIdx}>{address}</li>
+                                ))}
+                              </ul>
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
               </div>
             </div>
           </div>

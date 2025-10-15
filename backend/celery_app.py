@@ -18,6 +18,7 @@ def make_celery() -> Celery:
             "tasks.analytics_tasks",
             "tasks.message_tasks",
             "tasks.growth_tasks",
+            "tasks.promotion_tasks",
             "celery_tasks.tasks.scanning",
             "celery_tasks.tasks.imagery_fetch",
             "celery_tasks.tasks.cleanup_assets",

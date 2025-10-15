@@ -1,4 +1,5 @@
-# PRD‑13 · Growth Module (Contractor Prospecting)
+# PRD‑13 · Growth Module (Your Own Outreach)
 
-Daily refreshed contractor DB (licensing + directories), dedupe/enrich/verify, outreach sequences,
-personalized landing with gift leads, track replies→demos→paid.
+- Daily contractor DB refresh (licensing boards & directories, polite scraping).
+- Dedupe by company+phone; enrich email; verify.
+- Outreach sequences; personalized landing with gift leads on signup.
