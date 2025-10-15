@@ -31,29 +31,60 @@ const URGENCY_BADGES = {
 };
 
 const MAPBOX_TOKEN = process.env.REACT_APP_MAPBOX_TOKEN || '';
-const BASE_MAP_STYLE = MAPBOX_TOKEN
-  ? `https://api.mapbox.com/styles/v1/mapbox/satellite-streets-v12?access_token=${MAPBOX_TOKEN}`
-  : {
-      version: 8,
-      name: 'esri-satellite',
-      sources: {
-        'esri-satellite': {
-          type: 'raster',
-          tiles: [
-            'https://services.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}'
-          ],
-          tileSize: 256,
-          attribution: 'Imagery © Esri & contributors',
+const SATELLITE_TILE_TEMPLATE = process.env.REACT_APP_SATELLITE_TILE_TEMPLATE || '';
+
+const BASE_MAP_STYLE = (() => {
+  if (MAPBOX_TOKEN) {
+    return `https://api.mapbox.com/styles/v1/mapbox/satellite-streets-v12?access_token=${MAPBOX_TOKEN}`;
+  }
+
+  if (SATELLITE_TILE_TEMPLATE) {
+    const tiles = SATELLITE_TILE_TEMPLATE.split(',').map((item) => item.trim()).filter(Boolean);
+    if (tiles.length) {
+      return {
+        version: 8,
+        name: 'fishmouth-satellite',
+        sources: {
+          'fishmouth-satellite': {
+            type: 'raster',
+            tiles,
+            tileSize: 256,
+            attribution: 'Imagery © Fishmouth Tiles',
+          },
         },
+        layers: [
+          {
+            id: 'fishmouth-satellite',
+            type: 'raster',
+            source: 'fishmouth-satellite',
+          },
+        ],
+      };
+    }
+  }
+
+  return {
+    version: 8,
+    name: 'esri-satellite',
+    sources: {
+      'esri-satellite': {
+        type: 'raster',
+        tiles: [
+          'https://services.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
+        ],
+        tileSize: 256,
+        attribution: 'Imagery © Esri & contributors',
       },
-      layers: [
-        {
-          id: 'esri-satellite',
-          type: 'raster',
-          source: 'esri-satellite',
-        },
-      ],
-    };
+    },
+    layers: [
+      {
+        id: 'esri-satellite',
+        type: 'raster',
+        source: 'esri-satellite',
+      },
+    ],
+  };
+})();
 
 const DEFAULT_VIEW = {
   latitude: 30.2672,

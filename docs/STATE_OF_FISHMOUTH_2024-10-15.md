@@ -24,7 +24,7 @@ Snapshot captured from branch `main` at commit `061bc5037487f06170bb2ac94ae119bb
 ### Modular Stack (`app/` overlays)
 - Base compose (`app/docker-compose.yml`): `postgres` (55432), `redis` (56379), `telemetry_gw_8030`, `admin_api_8031`, `billing_gw_8032`.
 - Service overlay (`app/config/docker-compose.additions.yml`): address lookup 8022, AI gateway 8023, vision AI 8024, mapping intel 8025, quality engine 8026, OSINT contacts 8027, event monitor 8028.
-- Tiles & imagery overlay (`app/config/docker-compose.tiles.yml`): Tileserver-GL (8080), TiTiler (8081), GeoServer (8082), PostGIS (5433) mounting local tile/imagery datasets. Bundled `app/tiles/roofing_markets.mbtiles` serves high-value coastal + northeastern neighborhoods with hazard scores.
+- Tiles & imagery overlay (`app/config/docker-compose.tiles.yml`): Tileserver-GL (8080), TiTiler (8081), GeoServer (8082), PostGIS (5433) mounting local tile/imagery datasets. Bundled `app/tiles/roofing_markets.mbtiles` serves high-value coastal + northeastern neighborhoods with hazard scores. Satellite sources are defined via `REACT_APP_SATELLITE_TILE_TEMPLATE` (see `docs/IMAGERY_SETUP.md`).
 - Observability overlay (`app/observability`): Prometheus, Grafana dashboards (`platform_overview.json`), and scrape config tuned to the telemetry gateway.
 - Admin UI (`app/admin-ui`): Vite build targeting `VITE_ADMIN_API`, includes Overview, Usage, Messaging, Queues, Health, Costs, and Users pages.
 - Database snapshot (`app/pgdata`) bundled for analytics schema state; complements SQL migration `app/sql/migrations/001_analytics_schema.sql`.
@@ -77,7 +77,7 @@ Snapshot captured from branch `main` at commit `061bc5037487f06170bb2ac94ae119bb
 ## Operating Notes
 - Core stack: `docker-compose up backend frontend orchestrator ...` (see root compose for full service list).
 - Modular stack: `cd app && docker compose -f docker-compose.yml -f config/docker-compose.additions.yml up --build`.
-- Tiles overlay: append `-f config/docker-compose.tiles.yml` when local MBTiles/TIff assets are needed. Vector overlays originate from `data/geojson/roofing_markets.geojson` via `scripts/ops/build_roofing_market_dataset.py` + `scripts/ops/geojson_to_mbtiles.py`.
+- Tiles overlay: append `-f config/docker-compose.tiles.yml` when local MBTiles/TIff assets are needed. Vector overlays originate from `data/geojson/roofing_markets.geojson` via `scripts/ops/build_roofing_market_dataset.py` + `scripts/ops/geojson_to_mbtiles.py`. Satellite imagery can be streamed or downloaded following `docs/IMAGERY_SETUP.md`.
 - Observability: `docker compose -f docker-compose.yml -f observability/docker-compose.observability.yml up prometheus grafana`.
 - Admin UI dev: `cd app/admin-ui && npm install && npm run dev -- --port 4173` with `VITE_ADMIN_API=http://localhost:8031`.
 
