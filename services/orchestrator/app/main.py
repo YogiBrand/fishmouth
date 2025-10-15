@@ -6,7 +6,6 @@ from fastapi import FastAPI, HTTPException, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import List, Optional, Dict, Any
-import logging
 import asyncio
 from datetime import datetime, timedelta
 import json
@@ -14,18 +13,14 @@ import httpx
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
 
-# Setup logging
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-)
-logger = logging.getLogger(__name__)
+import structlog
 
 # Import our modules
 import sys
 sys.path.append('../../..')
 from shared.database import db_client
 from shared.redis_client import redis_client
+from shared.observability import RequestContextMiddleware, setup_observability
 from app.workflows.city_processor import CityProcessor
 from app.scheduling.job_scheduler import JobScheduler
 from app.monitoring.health_monitor import HealthMonitor
@@ -36,6 +31,11 @@ app = FastAPI(
     description="Central coordination for data acquisition workflows",
     version="1.0.0"
 )
+
+SERVICE_NAME = "orchestrator"
+setup_observability(SERVICE_NAME)
+logger = structlog.get_logger(SERVICE_NAME)
+app.add_middleware(RequestContextMiddleware, service_name=SERVICE_NAME)
 
 # CORS middleware
 app.add_middleware(
@@ -100,7 +100,7 @@ scheduler = AsyncIOScheduler()
 
 # Service endpoints for inter-service communication
 SERVICE_URLS = {
-    'scraper': 'http://scraper-service:8002',
+    'scraper': 'http://scraper-service:8011',
     'enrichment': 'http://enrichment-service:8004', 
     'lead_generator': 'http://lead-generator:8008'
 }
@@ -119,9 +119,9 @@ async def startup():
         # Schedule daily workflows
         await schedule_daily_workflows()
         
-        logger.info("✅ Orchestrator Service started successfully")
+        logger.info("startup.success")
     except Exception as e:
-        logger.error(f"❌ Failed to start Orchestrator Service: {e}")
+        logger.error("startup.failed", error=str(e))
         raise
 
 @app.on_event("shutdown")
@@ -131,9 +131,9 @@ async def shutdown():
         scheduler.shutdown()
         await db_client.disconnect()
         await redis_client.disconnect()
-        logger.info("✅ Orchestrator Service shut down cleanly")
+        logger.info("shutdown.success")
     except Exception as e:
-        logger.error(f"❌ Error during shutdown: {e}")
+        logger.error("shutdown.failed", error=str(e))
 
 async def schedule_daily_workflows():
     """Schedule daily automated workflows"""
@@ -170,15 +170,24 @@ async def schedule_daily_workflows():
             replace_existing=True
         )
         
-        logger.info("✅ Scheduled all daily workflows")
+        logger.info("scheduler.started")
         
     except Exception as e:
-        logger.error(f"❌ Failed to schedule workflows: {e}")
+        logger.error("scheduler.failed", error=str(e))
 
-# Health check
-@app.get("/health")
-async def health_check():
-    """Comprehensive health check for entire system"""
+# Health endpoints
+@app.get("/healthz")
+async def healthz():
+    return {
+        "status": "ok",
+        "service": SERVICE_NAME,
+        "timestamp": datetime.utcnow().isoformat(),
+    }
+
+
+@app.get("/readyz")
+async def readyz():
+    """Comprehensive readiness probe for the orchestrator."""
     try:
         system_health = await health_monitor.check_system_health()
         
@@ -190,8 +199,13 @@ async def health_check():
             "active_jobs": len(scheduler.get_jobs())
         }
     except Exception as e:
-        logger.error(f"Health check failed: {e}")
+        logger.error("readyz.failed", error=str(e))
         raise HTTPException(status_code=503, detail=f"Service unhealthy: {e}")
+
+
+@app.get("/health")
+async def legacy_health():
+    return await readyz()
 
 # Get system status
 @app.get("/status", response_model=SystemStatus)

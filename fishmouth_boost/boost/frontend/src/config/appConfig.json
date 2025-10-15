@@ -1,0 +1,5 @@
+{
+  "featureFlags": { "reports": true, "voice": true, "scanner": true },
+  "kpis": ["hot_leads_today", "views_7d", "appointments_7d", "reports_sent_7d", "replies_7d", "warm_leads_today"],
+  "leadTableColumns": ["address","owner","verified_contacts","roof_age","priority","confidence","reason_codes","last_activity","next_step"]
+}

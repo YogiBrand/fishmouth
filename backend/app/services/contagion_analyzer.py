@@ -11,6 +11,9 @@ from sqlalchemy.dialects.postgresql import insert
 
 from app.core.database import get_db
 from app.models import ContagionCluster, PropertyScore
+from services.ai.roof_intelligence import EnhancedRoofAnalysisPipeline
+from services.providers.property_enrichment import PropertyProfile
+from storage import save_overlay_png
 
 
 logger = logging.getLogger(__name__)
@@ -194,14 +197,18 @@ class ContagionAnalyzerService:
                 },
             )
 
+            pipeline = EnhancedRoofAnalysisPipeline()
             scores: List[Dict[str, object]] = []
-            for property_row in properties:
-                try:
-                    score = await cls._calculate_property_score(db, property_row, cluster)
-                    scores.append(score)
-                except Exception as exc:  # noqa: BLE001
-                    logger.exception("contagion.score_error", property_id=property_row["id"], error=str(exc))
-                    continue
+            try:
+                for property_row in properties:
+                    try:
+                        score = await cls._calculate_property_score(db, property_row, cluster, pipeline)
+                        scores.append(score)
+                    except Exception as exc:  # noqa: BLE001
+                        logger.exception("contagion.score_error", property_id=property_row["id"], error=str(exc))
+                        continue
+            finally:
+                await pipeline.aclose()
 
             if scores:
                 stmt = insert(PropertyScore).values(scores)
@@ -216,6 +223,11 @@ class ContagionAnalyzerService:
                         "urgency_tier": stmt.excluded.urgency_tier,
                         "confidence_level": stmt.excluded.confidence_level,
                         "recommended_action": stmt.excluded.recommended_action,
+                        "has_aerial_analysis": stmt.excluded.has_aerial_analysis,
+                        "aerial_image_url": stmt.excluded.aerial_image_url,
+                        "image_quality": stmt.excluded.image_quality,
+                        "confidence": stmt.excluded.confidence,
+                        "overlays_url": stmt.excluded.overlays_url,
                         "last_updated_at": datetime.utcnow(),
                     },
                 )
@@ -278,6 +290,9 @@ class ContagionAnalyzerService:
                     ps.permits_within_500ft,
                     ps.nearest_permit_address,
                     ps.nearest_permit_distance_ft,
+                    ps.image_quality,
+                    ps.confidence,
+                    ps.overlays_url,
                     cc.cluster_status
                 FROM properties p
                 JOIN property_scores ps ON p.id = ps.property_id
@@ -336,6 +351,7 @@ class ContagionAnalyzerService:
         db,
         property_data: Dict[str, object],
         cluster: Dict[str, object],
+        pipeline: Optional[EnhancedRoofAnalysisPipeline] = None,
     ) -> Dict[str, object]:
         property_geom = sa.text(
             "ST_SetSRID(ST_MakePoint(:lng, :lat), 4326)::geography"
@@ -414,6 +430,55 @@ class ContagionAnalyzerService:
         financial_score = cls._score_financial(property_data)
         visual_score = cls._score_visual(property_data)
 
+        image_quality_score: Optional[float] = None
+        overlay_url: Optional[str] = None
+        imagery_confidence: Optional[float] = None
+        aerial_image_url: Optional[str] = property_data.get("aerial_image_url")
+        has_aerial_analysis = False
+
+        if (
+            pipeline
+            and property_data.get("latitude") is not None
+            and property_data.get("longitude") is not None
+        ):
+            try:
+                lat = float(property_data["latitude"])
+                lng = float(property_data["longitude"])
+                profile = PropertyProfile(
+                    year_built=property_data.get("year_built"),
+                    property_type=property_data.get("property_type"),
+                    lot_size_sqft=property_data.get("lot_size_sqft"),
+                    roof_material=property_data.get("roof_material"),
+                    bedrooms=property_data.get("bedrooms"),
+                    bathrooms=property_data.get("bathrooms"),
+                    square_feet=property_data.get("square_feet"),
+                    property_value=property_data.get("estimated_value"),
+                    last_roof_replacement_year=None,
+                    source="contagion",
+                )
+                enhanced = await pipeline.analyze_roof_with_quality_control(
+                    property_id=str(property_data["id"]),
+                    latitude=lat,
+                    longitude=lng,
+                    property_profile=profile,
+                    enable_street_view=False,
+                )
+                has_aerial_analysis = True
+                image_quality_score = enhanced.imagery.quality.overall_score
+                imagery_confidence = enhanced.roof_analysis.confidence
+                aerial_image_url = enhanced.imagery.public_url
+                overlay_url = enhanced.anomaly_bundle.heatmap_url
+                if enhanced.anomaly_bundle.heatmap_bytes:
+                    overlay_url = save_overlay_png(
+                        f"property-{property_data['id']}", enhanced.anomaly_bundle.heatmap_bytes
+                    )
+            except Exception as exc:  # noqa: BLE001
+                logger.debug(
+                    "contagion.imagery_fetch_failed",
+                    property_id=property_data.get("id"),
+                    error=str(exc),
+                )
+
         total_score = (contagion_score or 0) + age_match_score + financial_score + visual_score
         urgency_tier, recommended_action = cls._classify_urgency(total_score)
         confidence_level = cls._confidence_level(property_data, contagion_score)
@@ -437,13 +502,17 @@ class ContagionAnalyzerService:
             "home_value": property_data.get("estimated_value"),
             "estimated_equity_percent": property_data.get("equity_percent"),
             "visual_score": visual_score,
-            "has_aerial_analysis": False,
+            "has_aerial_analysis": has_aerial_analysis,
+            "aerial_image_url": aerial_image_url,
+            "image_quality": image_quality_score,
+            "confidence": imagery_confidence,
+            "overlays_url": overlay_url,
             "total_urgency_score": total_score,
             "urgency_tier": urgency_tier,
             "confidence_level": confidence_level,
             "recommended_action": recommended_action,
             "scored_at": datetime.utcnow(),
-            "scoring_version": "v1.0",
+            "scoring_version": "v1.5",
             "data_sources_used": None,
         }
 

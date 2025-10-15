@@ -18,11 +18,35 @@ from PIL import Image, ImageEnhance, ImageFilter
 from fastapi import FastAPI, HTTPException, BackgroundTasks
 from pydantic import BaseModel
 
+import structlog
+
+ROOT_DIR = Path(__file__).resolve().parents[2]
+if str(ROOT_DIR) not in sys.path:
+    sys.path.append(str(ROOT_DIR))
+
+from shared.observability import RequestContextMiddleware, setup_observability
+
+SERVICE_NAME = "image-processor"
+setup_observability(SERVICE_NAME)
+logger = structlog.get_logger(SERVICE_NAME)
+
+
+def _structured_print(*args, level: str = "info", **kwargs):
+    message = " ".join(str(arg) for arg in args)
+    log_method = getattr(logger, level, logger.info)
+    log_method("log", message=message)
+
+
+print = _structured_print  # noqa: A001 - surface logs through structlog
+
+
 app = FastAPI(
     title="Cost-Optimized Image Processor",
     description="FREE-FIRST satellite/street view imagery with local AI processing",
     version="2.1.0"
 )
+
+app.add_middleware(RequestContextMiddleware, service_name=SERVICE_NAME)
 
 # Cost-optimized configuration
 GOOGLE_MAPS_API_KEY = os.getenv("GOOGLE_MAPS_API_KEY", "")
@@ -35,23 +59,37 @@ USE_OPENSTREETMAP_TILES = True
 USE_LOCAL_SUPER_RESOLUTION = True
 USE_BATCH_PROCESSING = True
 
-print("🚀 Starting COST-OPTIMIZED Image Processor with FREE-FIRST approach")
+logger.info("startup.begin", note="Starting cost-optimized image processor")
 
-@app.get("/health")
-async def health_check():
-    """Health check with cost optimization status"""
+@app.get("/healthz")
+async def healthz():
+    return {
+        "status": "ok",
+        "service": SERVICE_NAME,
+        "timestamp": datetime.utcnow().isoformat(),
+    }
+
+
+@app.get("/readyz")
+async def readyz():
+    """Readiness check with cost optimisation status."""
     return {
         "status": "healthy",
-        "service": "cost-optimized-image-processor",
+        "service": SERVICE_NAME,
         "port": 8012,
         "cost_optimizations": {
             "free_openstreetmap": USE_OPENSTREETMAP_TILES,
             "local_super_resolution": USE_LOCAL_SUPER_RESOLUTION,
             "extended_caching": f"{CACHE_DURATION_DAYS} days",
-            "batch_processing": USE_BATCH_PROCESSING
+            "batch_processing": USE_BATCH_PROCESSING,
         },
-        "estimated_cost_savings": "75% vs traditional APIs"
+        "estimated_cost_savings": "75% vs traditional APIs",
     }
+
+
+@app.get("/health")
+async def legacy_health():
+    return await readyz()
 
 class CostOptimizedSatelliteRequest(BaseModel):
     property_id: str

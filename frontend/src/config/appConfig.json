@@ -1,0 +1,34 @@
+{
+  "featureFlags": {
+    "reports": true,
+    "voice": true,
+    "scanner": true,
+    "roi": true
+  },
+  "kpis": [
+    "hot_leads_today",
+    "warm_leads_today",
+    "reports_sent_7d",
+    "views_7d",
+    "replies_7d",
+    "appointments_7d"
+  ],
+  "leadTableColumns": [
+    "address",
+    "owner",
+    "verified_contacts",
+    "roof_age",
+    "priority",
+    "confidence",
+    "reason_codes",
+    "last_activity",
+    "next_step"
+  ],
+  "leadQueueTabs": [
+    { "id": "hot", "label": "HOT" },
+    { "id": "warm", "label": "WARM" },
+    { "id": "followups", "label": "Follow-ups" },
+    { "id": "unreached", "label": "Unreached" },
+    { "id": "dnc", "label": "DNC" }
+  ]
+}

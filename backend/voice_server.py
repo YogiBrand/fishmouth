@@ -6,18 +6,18 @@ from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import List, Optional, Dict, Any
-import logging
 import asyncio
 import json
 import os
 from datetime import datetime
 
-# Setup logging
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-)
-logger = logging.getLogger(__name__)
+import structlog
+
+from shared.observability import RequestContextMiddleware, setup_observability
+
+SERVICE_NAME = "voice-server"
+setup_observability(SERVICE_NAME)
+logger = structlog.get_logger(SERVICE_NAME)
 
 # Simple Voice Agent Mock (for now)
 class AIVoiceAgentService:
@@ -129,6 +129,7 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+app.add_middleware(RequestContextMiddleware, service_name=SERVICE_NAME)
 
 # Pydantic models
 class CampaignRequest(BaseModel):
@@ -146,20 +147,29 @@ class CallRequest(BaseModel):
     contractor_id: Optional[str] = None
     script_template: Optional[str] = "default"
 
-# Health check
+# Health endpoints
+@app.get("/healthz")
+async def healthz():
+    return {
+        "status": "ok",
+        "timestamp": datetime.utcnow().isoformat(),
+        "service": SERVICE_NAME,
+    }
+
+
+@app.get("/readyz")
+async def readyz():
+    return {
+        "status": "healthy",
+        "timestamp": datetime.utcnow().isoformat(),
+        "service": SERVICE_NAME,
+        "port": 8001,
+    }
+
+
 @app.get("/health")
-async def health_check():
-    """Health check endpoint"""
-    try:
-        return {
-            "status": "healthy",
-            "timestamp": datetime.utcnow().isoformat(),
-            "service": "ai-voice-server",
-            "port": 8001
-        }
-    except Exception as e:
-        logger.error(f"Health check failed: {e}")
-        raise HTTPException(status_code=503, detail=f"Service unhealthy: {e}")
+async def legacy_health():
+    return await readyz()
 
 # Campaign management
 @app.post("/api/v1/ai-voice/campaign")
@@ -177,7 +187,7 @@ async def launch_campaign(request: CampaignRequest):
         )
         return result
     except Exception as e:
-        logger.error(f"Campaign launch failed: {e}")
+        logger.error("campaign.launch_failed", error=str(e))
         raise HTTPException(status_code=500, detail=f"Campaign launch failed: {e}")
 
 @app.post("/api/v1/ai-voice/follow-up")
@@ -191,7 +201,7 @@ async def schedule_follow_up(request: FollowUpRequest):
         await service.send_followup_sequence(request.lead_id, sequence_type=request.sequence_type)
         return {"status": "queued", "lead_id": request.lead_id}
     except Exception as e:
-        logger.error(f"Follow-up scheduling failed: {e}")
+        logger.error("followup.failed", error=str(e))
         raise HTTPException(status_code=500, detail=f"Follow-up scheduling failed: {e}")
 
 @app.post("/api/v1/ai-voice/call")
@@ -207,7 +217,7 @@ async def make_call(request: CallRequest):
         )
         return result
     except Exception as e:
-        logger.error(f"Call failed: {e}")
+        logger.error("call.failed", error=str(e))
         raise HTTPException(status_code=500, detail=f"Call failed: {e}")
 
 @app.get("/api/v1/ai-voice/campaigns")
@@ -218,7 +228,7 @@ async def list_campaigns():
         campaigns = await service.list_campaigns()
         return {"campaigns": campaigns}
     except Exception as e:
-        logger.error(f"Failed to list campaigns: {e}")
+        logger.error("campaign.list_failed", error=str(e))
         raise HTTPException(status_code=500, detail=f"Failed to list campaigns: {e}")
 
 @app.get("/api/v1/ai-voice/campaigns/{campaign_id}")
@@ -233,7 +243,7 @@ async def get_campaign(campaign_id: str):
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Failed to get campaign: {e}")
+        logger.error("campaign.retrieve_failed", campaign_id=campaign_id, error=str(e))
         raise HTTPException(status_code=500, detail=f"Failed to get campaign: {e}")
 
 @app.get("/api/v1/ai-voice/calls")
@@ -244,7 +254,7 @@ async def list_calls(limit: int = 50, status: Optional[str] = None):
         calls = await service.list_calls(limit=limit, status=status)
         return {"calls": calls}
     except Exception as e:
-        logger.error(f"Failed to list calls: {e}")
+        logger.error("call.list_failed", error=str(e))
         raise HTTPException(status_code=500, detail=f"Failed to list calls: {e}")
 
 @app.get("/api/v1/ai-voice/calls/{call_id}")
@@ -259,7 +269,7 @@ async def get_call(call_id: str):
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Failed to get call: {e}")
+        logger.error("call.retrieve_failed", call_id=call_id, error=str(e))
         raise HTTPException(status_code=500, detail=f"Failed to get call: {e}")
 
 @app.websocket("/ws/voice-stream/{call_id}")
@@ -289,9 +299,9 @@ async def voice_stream(websocket: WebSocket, call_id: str):
                 break
                 
     except WebSocketDisconnect:
-        logger.info(f"WebSocket disconnected for call {call_id}")
+        logger.info("ws.disconnected", call_id=call_id)
     except Exception as e:
-        logger.error(f"WebSocket error for call {call_id}: {e}")
+        logger.error("ws.error", call_id=call_id, error=str(e))
         await websocket.send_text(json.dumps({"error": str(e)}))
 
 if __name__ == "__main__":

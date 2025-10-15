@@ -16,6 +16,7 @@ class FeatureFlags(BaseSettings):
     use_mock_property_enrichment: bool = Field(True, description="Skip paid enrichment providers")
     use_mock_contact_enrichment: bool = Field(True)
     use_mock_sequence_delivery: bool = Field(True, description="Disable real email/SMS/voice sends")
+    outbox_dry_run: bool = Field(True, description="Queue messaging events without hitting providers")
     enable_voice_agent: bool = Field(True)
     use_inline_scan_runner: bool = Field(True, description="Execute scans inline instead of Celery")
     use_inline_sequence_runner: bool = Field(True, description="Execute sequence processing inline")
@@ -39,6 +40,8 @@ class InstrumentationSettings(BaseSettings):
     sentry_profiles_sample_rate: float = Field(0.0, ge=0, le=1)
     enable_prometheus: bool = Field(True)
     log_level: str = Field("INFO")
+    otel_exporter_endpoint: Optional[str] = Field(default=None, env="OTEL_EXPORTER_OTLP_ENDPOINT")
+    sentry_release: Optional[str] = Field(default=None, env="SENTRY_RELEASE")
 
 
 class StorageSettings(BaseSettings):
@@ -61,6 +64,7 @@ class ProviderSettings(BaseSettings):
     property_enrichment_api_key: Optional[str] = Field(None, env="PROPERTY_ENRICHMENT_API_KEY")
     contact_enrichment_api_key: Optional[str] = Field(None, env="CONTACT_ENRICHMENT_API_KEY")
     sendgrid_api_key: Optional[str] = Field(None, env="SENDGRID_API_KEY")
+    sendgrid_event_public_key: Optional[str] = Field(None, env="SENDGRID_EVENT_PUBLIC_KEY")
     postmark_api_token: Optional[str] = Field(None, env="POSTMARK_API_TOKEN")
     telnyx_api_key: Optional[str] = Field(None, env="TELNYX_API_KEY")
     telnyx_messaging_profile_id: Optional[str] = Field(None, env="TELNYX_MESSAGING_PROFILE_ID")

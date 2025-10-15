@@ -469,9 +469,16 @@ const LeadDetailPage = () => {
   const qualityIssues = lead?.image_quality_issues || imageryMeta?.quality?.issues || [];
   const streetViewList = roofIntel?.street_view || lead?.ai_analysis?.street_view || [];
   const heatmapUrl = roofIntel?.heatmap?.url || imageryMeta?.heatmap_url || null;
+  const overlayUrl = lead?.overlay_url || imageryMeta?.overlay_url || heatmapUrl;
   const normalizedRoofUrl = roofIntel?.roof_view?.image_url || null;
   const streetAverageQuality = lead?.street_view_quality?.average_quality ?? null;
   const streetAverageOcclusion = lead?.street_view_quality?.average_occlusion ?? null;
+  const leadConfidence =
+    lead?.analysis_confidence ??
+    roofIntel?.analysis?.confidence ??
+    imageryMeta?.confidence ??
+    lead?.ai_analysis?.confidence ??
+    null;
 
   const qualityClasses = {
     passed: 'bg-emerald-50 text-emerald-700 border border-emerald-200',
@@ -498,6 +505,13 @@ const LeadDetailPage = () => {
       )}
     </div>
   );
+
+  const confidenceBadge = leadConfidence !== null ? (
+    <div className="inline-flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium bg-sky-50 text-sky-700 border border-sky-200">
+      <Shield className="h-4 w-4" />
+      <span>Confidence {Math.round(Math.min(Math.max(leadConfidence, 0), 0.995) * 100)}%</span>
+    </div>
+  ) : null;
 
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
@@ -960,15 +974,22 @@ const LeadDetailPage = () => {
                   )}
 
                   {/* Enhanced Imagery */}
-                  {(heatmapUrl || normalizedRoofUrl) && (
+                  {(overlayUrl || normalizedRoofUrl) && (
                     <div className="mt-6">
-                      <div className="flex items-center justify-between mb-3">
+                      <div className="flex items-center justify-between gap-3 mb-3 flex-wrap">
                         <label className="block text-sm font-semibold text-gray-700">AI Roof Intelligence</label>
-                        {roofIntel?.analysis?.condition_score && (
-                          <span className="px-3 py-1 text-xs rounded-full bg-blue-50 text-blue-700 border border-blue-200">
-                            Confidence {Math.round((roofIntel.analysis.confidence || lead.ai_analysis?.confidence || 0) * 100) / 100}
-                          </span>
-                        )}
+                        <div className="flex items-center gap-2 flex-wrap justify-end">
+                          {overlayUrl && (
+                            <button
+                              type="button"
+                              onClick={() => setShowOverlay((prev) => !prev)}
+                              className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-white border border-gray-200 text-sm font-medium text-gray-700 shadow-sm hover:bg-gray-50"
+                            >
+                              {showOverlay ? 'Hide Overlay' : 'Show Overlay'}
+                            </button>
+                          )}
+                          {confidenceBadge}
+                        </div>
                       </div>
                       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                         {normalizedRoofUrl && (
@@ -983,13 +1004,22 @@ const LeadDetailPage = () => {
                             </div>
                           </div>
                         )}
-                        {heatmapUrl && (
+                        {(normalizedRoofUrl || overlayUrl) && (
                           <div className="bg-gray-50 border border-gray-200 rounded-xl overflow-hidden">
-                            <img 
-                              src={heatmapUrl}
-                              alt="Roof anomaly heatmap"
-                              className="w-full h-64 object-cover"
-                            />
+                            <div className="relative w-full h-64">
+                              <img
+                                src={normalizedRoofUrl || lead.aerial_image_url || overlayUrl}
+                                alt="Roof anomaly heatmap"
+                                className="w-full h-full object-cover"
+                              />
+                              {showOverlay && overlayUrl && (
+                                <img
+                                  src={overlayUrl}
+                                  alt="Roof anomaly overlay"
+                                  className="absolute inset-0 w-full h-full object-cover mix-blend-screen opacity-85"
+                                />
+                              )}
+                            </div>
                             <div className="px-4 py-3 text-sm text-gray-600 border-t border-gray-200">
                               Heatmap overlay highlighting discoloration and anomalies detected.
                             </div>

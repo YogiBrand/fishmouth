@@ -66,3 +66,13 @@ def hashed_filename(prefix: str, *parts: str, suffix: str = "") -> str:
     if suffix and not suffix.startswith("."):
         suffix = "." + suffix
     return f"{prefix}-{digest}{suffix}"
+
+
+def save_overlay_png(identifier: str, data: bytes) -> str:
+    """Persist an overlay PNG under the FastAPI static uploads directory."""
+
+    base_dir = Path(__file__).resolve().parent / "uploads" / "overlays"
+    base_dir.mkdir(parents=True, exist_ok=True)
+    path = base_dir / f"{identifier}.png"
+    path.write_bytes(data)
+    return f"/uploads/overlays/{identifier}.png"

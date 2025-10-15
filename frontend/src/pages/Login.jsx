@@ -1,13 +1,17 @@
 /**
  * Login Page - Beautifully designed and perfectly responsive
  */
-import React, { useState } from 'react';
+import React, { useCallback, useMemo, useState } from 'react';
 import { useSEO } from '../utils/seo';
 import { useNavigate, Link } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import { Mail, Lock, AlertCircle, ArrowRight, Shield } from 'lucide-react';
 import GoogleAuthButton from '../components/GoogleAuthButton';
 import MicrosoftAuthButton from '../components/MicrosoftAuthButton';
+import AppleAuthButton from '../components/AppleAuthButton';
+import GoogleLogo from '../assets/brand/google.svg';
+import AppleLogo from '../assets/brand/apple.svg';
+import MicrosoftLogo from '../assets/brand/microsoft.svg';
 
 const Login = () => {
   const [formData, setFormData] = useState({
@@ -17,6 +21,21 @@ const Login = () => {
   const [loading, setLoading] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState('');
+  const [googleCtrl, setGoogleCtrl] = useState({
+    open: null,
+    isReady: false,
+    isAvailable: Boolean(process.env.REACT_APP_GOOGLE_CLIENT_ID)
+  });
+  const [appleCtrl, setAppleCtrl] = useState({
+    open: null,
+    isReady: false,
+    isAvailable: Boolean(process.env.REACT_APP_APPLE_CLIENT_ID),
+  });
+  const [microsoftCtrl, setMicrosoftCtrl] = useState({
+    open: null,
+    isReady: Boolean(process.env.REACT_APP_MS_CLIENT_ID),
+    isAvailable: Boolean(process.env.REACT_APP_MS_CLIENT_ID),
+  });
 
   const { login } = useAuth();
   const navigate = useNavigate();
@@ -30,6 +49,143 @@ const Login = () => {
     ogImage: 'https://fishmouth.io/og-login.jpg'
   });
 
+  const routeUser = useCallback((userData) => {
+    if (!userData) {
+      navigate('/dashboard');
+      return;
+    }
+    if (userData.role === 'admin' || userData.role === 'superadmin') {
+      navigate('/admin/dashboard');
+    } else {
+      navigate('/dashboard');
+    }
+  }, [navigate]);
+
+  const handleProviderSuccess = useCallback((result = {}) => {
+    setError('');
+    if (result?.user) {
+      routeUser(result.user);
+    } else {
+      routeUser(null);
+    }
+  }, [routeUser]);
+
+  const handleProviderError = useCallback((message) => {
+    if (message) {
+      setError(message);
+    }
+  }, []);
+
+  const handleGoogleExpose = useCallback((controller = {}) => {
+    setGoogleCtrl((prev) => ({
+      open: controller.open || prev.open,
+      isReady: typeof controller.isReady === 'boolean' ? controller.isReady : prev.isReady,
+      isAvailable: typeof controller.isAvailable === 'boolean' ? controller.isAvailable : prev.isAvailable,
+    }));
+  }, []);
+
+  const handleAppleExpose = useCallback((controller = {}) => {
+    setAppleCtrl((prev) => ({
+      open: controller.open || prev.open,
+      isReady: typeof controller.isReady === 'boolean' ? controller.isReady : prev.isReady,
+      isAvailable: typeof controller.isAvailable === 'boolean' ? controller.isAvailable : prev.isAvailable,
+    }));
+  }, []);
+
+  const handleMicrosoftExpose = useCallback((controller = {}) => {
+    setMicrosoftCtrl((prev) => ({
+      open: controller.open || prev.open,
+      isReady: typeof controller.isReady === 'boolean' ? controller.isReady : prev.isReady,
+      isAvailable: typeof controller.isAvailable === 'boolean' ? controller.isAvailable : prev.isAvailable,
+    }));
+  }, []);
+
+  const handleMicrosoftClick = () => {
+    setError('');
+    if (!microsoftCtrl.isAvailable) {
+      setError('Microsoft login is not configured.');
+      return;
+    }
+    if (!microsoftCtrl.isReady) {
+      setError('Microsoft sign-in is still preparing. Please try again momentarily.');
+      return;
+    }
+    try {
+      microsoftCtrl.open?.();
+    } catch (err) {
+      setError(err?.message || 'Unable to start Microsoft login.');
+    }
+  };
+
+  const providerStyles = useMemo(
+    () => ({
+      google: 'bg-white text-gray-700 border border-gray-300 hover:bg-gray-50',
+      apple: 'bg-white text-gray-700 border border-gray-300 hover:bg-gray-50',
+      microsoft: 'bg-white text-gray-700 border border-gray-300 hover:bg-gray-50',
+    }),
+    []
+  );
+
+  const ProviderButton = ({ variant, label, icon, onClick, disabled, title }) => (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={disabled}
+      className={`w-full flex items-center justify-center gap-3 font-semibold py-3.5 rounded-xl transition ${providerStyles[variant]} ${disabled ? 'opacity-50 cursor-not-allowed' : ''}`}
+      aria-label={label}
+      title={title || label}
+    >
+      {icon}
+      <span>{label}</span>
+    </button>
+  );
+
+  const GoogleIcon = (
+    <img src={GoogleLogo} alt="Google" className="h-5 w-5" loading="eager" />
+  );
+
+  const AppleIcon = (
+    <img src={AppleLogo} alt="Apple" className="h-5 w-5" loading="eager" />
+  );
+
+  const MicrosoftIcon = (
+    <img src={MicrosoftLogo} alt="Microsoft" className="h-5 w-5" loading="eager" />
+  );
+
+  const handleGoogleClick = () => {
+    setError('');
+    if (!googleCtrl.isAvailable) {
+      setError('Google login is not configured.');
+      return;
+    }
+    if (!googleCtrl.isReady) {
+      setError('Google sign-in is still loading. Please try again in a moment.');
+      return;
+    }
+    try {
+      googleCtrl.open?.();
+    } catch (err) {
+      setError(err?.message || 'Unable to start Google login.');
+    }
+  };
+
+  const handleAppleClick = () => {
+    setError('');
+    if (!appleCtrl.isAvailable) {
+      setError('Apple login is not configured.');
+      return;
+    }
+    if (!appleCtrl.isReady) {
+      setError('Apple sign-in is still loading. Please try again shortly.');
+      return;
+    }
+    try {
+      appleCtrl.open?.();
+    } catch (err) {
+      setError(err?.message || 'Unable to start Apple login.');
+    }
+  };
+
   const handleChange = (e) => {
     setFormData({
       ...formData,
@@ -42,26 +198,14 @@ const Login = () => {
     setError('');
     setLoading(true);
 
-    console.log('Login attempt with:', formData.email);
-
     try {
       const result = await login(formData.email, formData.password);
-      console.log('Login result:', result);
-      
       if (result.success) {
-        console.log('Login successful! User role:', result.user?.role);
-        // Redirect based on user role
-        if (result.user?.role === 'admin' || result.user?.role === 'superadmin') {
-          navigate('/admin/dashboard');
-        } else {
-          navigate('/dashboard');
-        }
+        routeUser(result.user);
       } else {
-        console.error('Login failed:', result.error);
         setError(result.error || 'Invalid email or password');
       }
     } catch (err) {
-      console.error('Login exception:', err);
       setError('An unexpected error occurred. Please try again.');
     } finally {
       setLoading(false);
@@ -187,27 +331,54 @@ const Login = () => {
                 <span className="px-3 bg-white text-gray-500">or continue with</span>
               </div>
             </div>
-            <div className="flex items-center justify-center gap-3">
-              <button
-                type="button"
-                onClick={() => document.querySelector('#gsi-click-proxy')?.click()}
-                className="h-10 w-10 rounded-full bg-white border-2 border-gray-200 flex items-center justify-center hover:bg-gray-50"
-                aria-label="Sign in with Google"
-                title="Sign in with Google"
-              >
-                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48" className="h-5 w-5">
-                  <path fill="#FFC107" d="M43.6 20.5H42V20H24v8h11.3C33.7 32.5 29.2 36 24 36c-6.6 0-12-5.4-12-12s5.4-12 12-12c3 0 5.7 1.1 7.8 3l5.7-5.7C34.6 6.1 29.6 4 24 4 12.9 4 4 12.9 4 24s8.9 20 20 20 20-8.9 20-20c0-1.3-.1-2.2-.4-3.5z"/><path fill="#FF3D00" d="M6.3 14.7l6.6 4.8C14.4 16.1 18.8 12 24 12c3 0 5.7 1.1 7.8 3l5.7-5.7C34.6 6.1 29.6 4 24 4 16.1 4 9.1 8.5 6.3 14.7z"/><path fill="#4CAF50" d="M24 44c5.1 0 9.8-1.9 13.3-5l-6.2-5.1C29.1 35.5 26.7 36 24 36c-5.2 0-9.7-3.5-11.3-8.4l-6.6 5.1C9 39.5 16 44 24 44z"/><path fill="#1976D2" d="M43.6 20.5H42V20H24v8h11.3c-1.3 3.7-4.7 6.5-8.3 7.4l6.2 5.1C36.9 38.1 40 31.7 40 24c0-1.3-.1-2.2-.4-3.5z"/>
-                </svg>
-              </button>
-              <MicrosoftAuthButton compact onSuccess={() => {}} />
+            <div className="space-y-3">
+              <ProviderButton
+                variant="google"
+                label="Sign in with Google"
+                icon={GoogleIcon}
+                onClick={handleGoogleClick}
+                disabled={!googleCtrl.isAvailable || !googleCtrl.isReady}
+                title={googleCtrl.isAvailable ? undefined : 'Google login not configured'}
+              />
+              <ProviderButton
+                variant="apple"
+                label="Sign in with Apple"
+                icon={AppleIcon}
+                onClick={handleAppleClick}
+                disabled={!appleCtrl.isAvailable || !appleCtrl.isReady}
+                title={appleCtrl.isAvailable ? undefined : 'Apple login not configured'}
+              />
+              <ProviderButton
+                variant="microsoft"
+                label="Sign in with Microsoft"
+                icon={MicrosoftIcon}
+                onClick={handleMicrosoftClick}
+                disabled={!microsoftCtrl.isAvailable || !microsoftCtrl.isReady}
+                title={microsoftCtrl.isAvailable ? undefined : 'Microsoft login not configured'}
+              />
             </div>
-            {/* Hidden Google-rendered button as a proxy for compact icon click */}
-            <div id="gsi-click-proxy" className="sr-only">
-              <GoogleAuthButton onSuccess={() => {}} hidden width={1} size="medium" exposeController={(ctrl) => {
-                // Map proxy click to open the Google auth
-                const btn = document.querySelector('#gsi-click-proxy');
-                if (btn) btn.addEventListener('click', ctrl.open);
-              }} />
+            <div className="sr-only" aria-hidden="true">
+              <GoogleAuthButton
+                hidden
+                exposeController={handleGoogleExpose}
+                onSuccess={handleProviderSuccess}
+                onError={handleProviderError}
+                width={1}
+                size="medium"
+              />
+              <AppleAuthButton
+                hidden
+                compact={false}
+                exposeController={handleAppleExpose}
+                onSuccess={handleProviderSuccess}
+                onError={handleProviderError}
+              />
+              <MicrosoftAuthButton
+                hidden
+                exposeController={handleMicrosoftExpose}
+                onSuccess={handleProviderSuccess}
+                onError={handleProviderError}
+              />
             </div>
           </div>
 

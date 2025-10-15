@@ -27,6 +27,15 @@ def _ensure_schema() -> None:
             "stripe_customer_id": "ALTER TABLE users ADD COLUMN stripe_customer_id VARCHAR",
             "stripe_subscription_item_id": "ALTER TABLE users ADD COLUMN stripe_subscription_item_id VARCHAR",
             "stripe_subscription_id": "ALTER TABLE users ADD COLUMN stripe_subscription_id VARCHAR",
+            "lead_credits": "ALTER TABLE users ADD COLUMN lead_credits INTEGER NOT NULL DEFAULT 0",
+            "gift_credits_awarded": "ALTER TABLE users ADD COLUMN gift_credits_awarded INTEGER NOT NULL DEFAULT 0",
+            "gift_leads_awarded": "ALTER TABLE users ADD COLUMN gift_leads_awarded INTEGER NOT NULL DEFAULT 0",
+            "gift_awarded_at": "ALTER TABLE users ADD COLUMN gift_awarded_at DATETIME",
+            "onboarding_state": (
+                "ALTER TABLE users ADD COLUMN onboarding_state JSONB NOT NULL DEFAULT '{}'::jsonb"
+                if engine.dialect.name != "sqlite"
+                else "ALTER TABLE users ADD COLUMN onboarding_state JSON NOT NULL DEFAULT '{}'"
+            ),
         }
         with engine.begin() as connection:
             for column_name, ddl in user_columns.items():
@@ -36,6 +45,10 @@ def _ensure_schema() -> None:
     # -------------------- Leads --------------------
     if "leads" in tables:
         existing_leads = {column["name"] for column in inspector.get_columns("leads")}
+        provenance_ddl = "ALTER TABLE leads ADD COLUMN provenance JSON DEFAULT '{}'"
+        if engine.dialect.name == "postgresql":
+            provenance_ddl = "ALTER TABLE leads ADD COLUMN provenance JSONB NOT NULL DEFAULT '{}'::jsonb"
+
         lead_columns = {
             "discovery_status": "ALTER TABLE leads ADD COLUMN discovery_status VARCHAR NOT NULL DEFAULT 'completed'",
             "imagery_status": "ALTER TABLE leads ADD COLUMN imagery_status VARCHAR NOT NULL DEFAULT 'synthetic'",
@@ -49,10 +62,35 @@ def _ensure_schema() -> None:
             "homeowner_phone_hash": "ALTER TABLE leads ADD COLUMN homeowner_phone_hash VARCHAR",
             "homeowner_email_encrypted": "ALTER TABLE leads ADD COLUMN homeowner_email_encrypted TEXT",
             "homeowner_phone_encrypted": "ALTER TABLE leads ADD COLUMN homeowner_phone_encrypted TEXT",
+            "dedupe_key": "ALTER TABLE leads ADD COLUMN dedupe_key VARCHAR(64)",
+            "provenance": provenance_ddl,
+            "dnc": "ALTER TABLE leads ADD COLUMN dnc BOOLEAN NOT NULL DEFAULT 0",
+            "consent_email": "ALTER TABLE leads ADD COLUMN consent_email BOOLEAN NOT NULL DEFAULT 0",
+            "consent_sms": "ALTER TABLE leads ADD COLUMN consent_sms BOOLEAN NOT NULL DEFAULT 0",
+            "consent_voice": "ALTER TABLE leads ADD COLUMN consent_voice BOOLEAN NOT NULL DEFAULT 0",
+            "analysis_confidence": "ALTER TABLE leads ADD COLUMN analysis_confidence FLOAT",
+            "overlay_url": "ALTER TABLE leads ADD COLUMN overlay_url VARCHAR(500)",
+            "score_version": "ALTER TABLE leads ADD COLUMN score_version VARCHAR(20)",
         }
         with engine.begin() as connection:
             for column_name, ddl in lead_columns.items():
                 if column_name not in existing_leads:
+                    connection.execute(text(ddl))
+
+        with engine.begin() as connection:
+            connection.execute(text("CREATE UNIQUE INDEX IF NOT EXISTS leads_dedupe_key_idx ON leads (dedupe_key)"))
+
+    # -------------------- Property Scores optional columns --------------------
+    if "property_scores" in tables:
+        existing_scores = {column["name"] for column in inspector.get_columns("property_scores")}
+        score_columns = {
+            "image_quality": "ALTER TABLE property_scores ADD COLUMN image_quality FLOAT",
+            "confidence": "ALTER TABLE property_scores ADD COLUMN confidence FLOAT",
+            "overlays_url": "ALTER TABLE property_scores ADD COLUMN overlays_url VARCHAR(500)",
+        }
+        with engine.begin() as connection:
+            for column_name, ddl in score_columns.items():
+                if column_name not in existing_scores:
                     connection.execute(text(ddl))
 
     # -------------------- Voice Calls --------------------
@@ -92,6 +130,462 @@ def _ensure_schema() -> None:
         with engine.begin() as connection:
             connection.execute(text(create_table_sql))
 
+    # -------------------- Reports optional columns --------------------
+    if "reports" in tables:
+        existing_reports = {column["name"] for column in inspector.get_columns("reports")}
+        with engine.begin() as connection:
+            if "render_checksum" not in existing_reports:
+                connection.execute(text("ALTER TABLE reports ADD COLUMN render_checksum VARCHAR(64)"))
+            if "render_html_path" not in existing_reports:
+                connection.execute(text("ALTER TABLE reports ADD COLUMN render_html_path VARCHAR(500)"))
+            if "preview_url" not in existing_reports:
+                connection.execute(text("ALTER TABLE reports ADD COLUMN preview_url VARCHAR(500)"))
+            if "rendered_at" not in existing_reports:
+                rendered_type = "TIMESTAMP" if engine.dialect.name != "sqlite" else "DATETIME"
+                connection.execute(text(f"ALTER TABLE reports ADD COLUMN rendered_at {rendered_type}"))
+
+    # -------------------- Events table --------------------
+    if "events" not in tables:
+        if engine.dialect.name == "sqlite":
+            create_events_sql = (
+                "CREATE TABLE events ("
+                "id VARCHAR(36) PRIMARY KEY, "
+                "type VARCHAR(100) NOT NULL, "
+                "actor VARCHAR(255), "
+                "lead_id VARCHAR(64), "
+                "report_id VARCHAR(64), "
+                "call_id VARCHAR(64), "
+                "source_service VARCHAR(100) NOT NULL, "
+                "payload JSON NOT NULL DEFAULT '{}', "
+                "request_id VARCHAR(128), "
+                "created_at DATETIME DEFAULT CURRENT_TIMESTAMP)"
+            )
+        else:
+            create_events_sql = (
+                "CREATE TABLE events ("
+                "id VARCHAR(36) PRIMARY KEY, "
+                "type VARCHAR(100) NOT NULL, "
+                "actor VARCHAR(255), "
+                "lead_id VARCHAR(64), "
+                "report_id VARCHAR(64), "
+                "call_id VARCHAR(64), "
+                "source_service VARCHAR(100) NOT NULL, "
+                "payload JSONB NOT NULL DEFAULT '{}'::jsonb, "
+                "request_id VARCHAR(128), "
+                "created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)"
+            )
+        with engine.begin() as connection:
+            connection.execute(text(create_events_sql))
+            connection.execute(text("CREATE INDEX IF NOT EXISTS ix_events_created_at ON events (created_at)"))
+            connection.execute(text("CREATE INDEX IF NOT EXISTS ix_events_type ON events (type)"))
+
+    # -------------------- Public Shares table --------------------
+    if "public_shares" not in tables:
+        if engine.dialect.name == "sqlite":
+            create_public_shares_sql = (
+                "CREATE TABLE public_shares ("
+                "id VARCHAR(36) PRIMARY KEY, "
+                "report_id VARCHAR(64) NOT NULL, "
+                "token VARCHAR(32) NOT NULL UNIQUE, "
+                "expires_at DATETIME, "
+                "revoked BOOLEAN NOT NULL DEFAULT 0, "
+                "created_at DATETIME DEFAULT CURRENT_TIMESTAMP, "
+                "FOREIGN KEY(report_id) REFERENCES reports(id) ON DELETE CASCADE)"
+            )
+        else:
+            create_public_shares_sql = (
+                "CREATE TABLE public_shares ("
+                "id VARCHAR(36) PRIMARY KEY, "
+                "report_id VARCHAR(64) NOT NULL REFERENCES reports(id) ON DELETE CASCADE, "
+                "token VARCHAR(32) NOT NULL UNIQUE, "
+                "expires_at TIMESTAMP, "
+                "revoked BOOLEAN NOT NULL DEFAULT FALSE, "
+                "created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)"
+            )
+        with engine.begin() as connection:
+            connection.execute(text(create_public_shares_sql))
+            connection.execute(text("CREATE INDEX IF NOT EXISTS ix_public_shares_report ON public_shares (report_id)"))
+            connection.execute(text("CREATE UNIQUE INDEX IF NOT EXISTS ix_public_shares_token ON public_shares (token)"))
+
+    # -------------------- Scan Jobs table --------------------
+    if "scan_jobs" not in tables:
+        if engine.dialect.name == "postgresql":
+            scan_jobs_sql = (
+                "CREATE TABLE scan_jobs ("
+                "id UUID PRIMARY KEY DEFAULT gen_random_uuid(), "
+                "user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE, "
+                "area_type VARCHAR(40) NOT NULL, "
+                "area_payload JSONB NOT NULL, "
+                "provider_policy JSONB NOT NULL, "
+                "filters JSONB, "
+                "enrichment_options JSONB, "
+                "budget_cents INTEGER NOT NULL DEFAULT 0, "
+                "budget_spent_cents INTEGER NOT NULL DEFAULT 0, "
+                "status VARCHAR(32) NOT NULL DEFAULT 'pending', "
+                "tiles_total INTEGER NOT NULL DEFAULT 0, "
+                "tiles_processed INTEGER NOT NULL DEFAULT 0, "
+                "tiles_cached INTEGER NOT NULL DEFAULT 0, "
+                "leads_generated INTEGER NOT NULL DEFAULT 0, "
+                "results JSONB, "
+                "error_message TEXT, "
+                "created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, "
+                "started_at TIMESTAMP, "
+                "finished_at TIMESTAMP"
+                ")"
+            )
+        else:
+            scan_jobs_sql = (
+                "CREATE TABLE scan_jobs ("
+                "id TEXT PRIMARY KEY, "
+                "user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE, "
+                "area_type VARCHAR(40) NOT NULL, "
+                "area_payload JSON NOT NULL, "
+                "provider_policy JSON NOT NULL, "
+                "filters JSON, "
+                "enrichment_options JSON, "
+                "budget_cents INTEGER NOT NULL DEFAULT 0, "
+                "budget_spent_cents INTEGER NOT NULL DEFAULT 0, "
+                "status VARCHAR(32) NOT NULL DEFAULT 'pending', "
+                "tiles_total INTEGER NOT NULL DEFAULT 0, "
+                "tiles_processed INTEGER NOT NULL DEFAULT 0, "
+                "tiles_cached INTEGER NOT NULL DEFAULT 0, "
+                "leads_generated INTEGER NOT NULL DEFAULT 0, "
+                "results JSON, "
+                "error_message TEXT, "
+                "created_at DATETIME DEFAULT CURRENT_TIMESTAMP, "
+                "started_at DATETIME, "
+                "finished_at DATETIME"
+                ")"
+            )
+        with engine.begin() as connection:
+            connection.execute(text(scan_jobs_sql))
+            connection.execute(text("CREATE INDEX IF NOT EXISTS ix_scan_jobs_user ON scan_jobs (user_id)"))
+            connection.execute(text("CREATE INDEX IF NOT EXISTS ix_scan_jobs_status ON scan_jobs (status)"))
+
+    # -------------------- ETL jobs table --------------------
+    if "etl_jobs" not in tables:
+        if engine.dialect.name == "postgresql":
+            job_table_sql = (
+                "CREATE TABLE etl_jobs ("
+                "id UUID PRIMARY KEY DEFAULT gen_random_uuid(), "
+                "job_type VARCHAR(64) NOT NULL, "
+                "target VARCHAR(255), "
+                "status VARCHAR(32) NOT NULL DEFAULT 'pending', "
+                "attempt INTEGER NOT NULL DEFAULT 1, "
+                "started_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, "
+                "finished_at TIMESTAMP, "
+                "records_processed INTEGER DEFAULT 0, "
+                "success_count INTEGER DEFAULT 0, "
+                "skip_count INTEGER DEFAULT 0, "
+                "error_count INTEGER DEFAULT 0, "
+                "job_metadata JSONB"
+                ")"
+            )
+        else:
+            job_table_sql = (
+                "CREATE TABLE etl_jobs ("
+                "id VARCHAR(36) PRIMARY KEY, "
+                "job_type VARCHAR(64) NOT NULL, "
+                "target VARCHAR(255), "
+                "status VARCHAR(32) NOT NULL DEFAULT 'pending', "
+                "attempt INTEGER NOT NULL DEFAULT 1, "
+                "started_at DATETIME DEFAULT CURRENT_TIMESTAMP, "
+                "finished_at DATETIME, "
+                "records_processed INTEGER DEFAULT 0, "
+                "success_count INTEGER DEFAULT 0, "
+                "skip_count INTEGER DEFAULT 0, "
+                "error_count INTEGER DEFAULT 0, "
+                "job_metadata JSON"
+                ")"
+            )
+        with engine.begin() as connection:
+            connection.execute(text(job_table_sql))
+            connection.execute(text("CREATE INDEX IF NOT EXISTS ix_etl_jobs_type ON etl_jobs (job_type)"))
+            connection.execute(text("CREATE INDEX IF NOT EXISTS ix_etl_jobs_status ON etl_jobs (status)"))
+
+    # -------------------- ETL errors table --------------------
+    if "etl_errors" not in tables:
+        if engine.dialect.name == "postgresql":
+            error_table_sql = (
+                "CREATE TABLE etl_errors ("
+                "id SERIAL PRIMARY KEY, "
+                "job_id UUID NOT NULL REFERENCES etl_jobs(id) ON DELETE CASCADE, "
+                "step VARCHAR(100) NOT NULL, "
+                "message TEXT NOT NULL, "
+                "retryable BOOLEAN NOT NULL DEFAULT TRUE, "
+                "created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP"
+                ")"
+            )
+        else:
+            error_table_sql = (
+                "CREATE TABLE etl_errors ("
+                "id INTEGER PRIMARY KEY AUTOINCREMENT, "
+                "job_id VARCHAR(36) NOT NULL, "
+                "step VARCHAR(100) NOT NULL, "
+                "message TEXT NOT NULL, "
+                "retryable BOOLEAN NOT NULL DEFAULT 1, "
+                "created_at DATETIME DEFAULT CURRENT_TIMESTAMP, "
+                "FOREIGN KEY(job_id) REFERENCES etl_jobs(id) ON DELETE CASCADE"
+                ")"
+            )
+        with engine.begin() as connection:
+            connection.execute(text(error_table_sql))
+            connection.execute(text("CREATE INDEX IF NOT EXISTS ix_etl_errors_job ON etl_errors (job_id)"))
+
+    # -------------------- Enrichment cache table --------------------
+    if "enrichment_cache" not in tables:
+        if engine.dialect.name == "postgresql":
+            cache_table_sql = (
+                "CREATE TABLE enrichment_cache ("
+                "cache_key VARCHAR(128) PRIMARY KEY, "
+                "cache_type VARCHAR(32) NOT NULL, "
+                "payload JSONB NOT NULL, "
+                "expires_at TIMESTAMP NOT NULL, "
+                "created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, "
+                "updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP"
+                ")"
+            )
+        else:
+            cache_table_sql = (
+                "CREATE TABLE enrichment_cache ("
+                "cache_key VARCHAR(128) PRIMARY KEY, "
+                "cache_type VARCHAR(32) NOT NULL, "
+                "payload JSON NOT NULL, "
+                "expires_at DATETIME NOT NULL, "
+                "created_at DATETIME DEFAULT CURRENT_TIMESTAMP, "
+                "updated_at DATETIME DEFAULT CURRENT_TIMESTAMP"
+                ")"
+            )
+        with engine.begin() as connection:
+            connection.execute(text(cache_table_sql))
+            connection.execute(text("CREATE INDEX IF NOT EXISTS ix_enrichment_cache_type ON enrichment_cache (cache_type)"))
+
+    # -------------------- Outbox messages --------------------
+    if "outbox_messages" not in tables:
+        if engine.dialect.name == "sqlite":
+            create_outbox_sql = (
+                "CREATE TABLE outbox_messages ("
+                "id TEXT PRIMARY KEY, "
+                "channel TEXT NOT NULL CHECK(channel IN ('email','sms')), "
+                "to_address TEXT NOT NULL, "
+                "subject TEXT, "
+                "body_html TEXT, "
+                "body_text TEXT, "
+                "payload JSON NOT NULL DEFAULT '{}', "
+                "status TEXT NOT NULL DEFAULT 'queued', "
+                "provider TEXT, "
+                "provider_message_id TEXT, "
+                "error TEXT, "
+                "created_at DATETIME DEFAULT CURRENT_TIMESTAMP, "
+                "queued_at DATETIME DEFAULT CURRENT_TIMESTAMP, "
+                "sent_at DATETIME, "
+                "delivered_at DATETIME"
+                ")"
+            )
+        else:
+            create_outbox_sql = (
+                "CREATE TABLE outbox_messages ("
+                "id UUID PRIMARY KEY DEFAULT gen_random_uuid(), "
+                "channel TEXT NOT NULL CHECK(channel IN ('email','sms')), "
+                "to_address TEXT NOT NULL, "
+                "subject TEXT, "
+                "body_html TEXT, "
+                "body_text TEXT, "
+                "payload JSONB NOT NULL DEFAULT '{}'::jsonb, "
+                "status TEXT NOT NULL DEFAULT 'queued', "
+                "provider TEXT, "
+                "provider_message_id TEXT, "
+                "error TEXT, "
+                "created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP, "
+                "queued_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP, "
+                "sent_at TIMESTAMP WITH TIME ZONE, "
+                "delivered_at TIMESTAMP WITH TIME ZONE"
+                ")"
+            )
+        with engine.begin() as connection:
+            connection.execute(text(create_outbox_sql))
+            connection.execute(text("CREATE INDEX IF NOT EXISTS ix_outbox_messages_status ON outbox_messages (status)"))
+            connection.execute(text("CREATE INDEX IF NOT EXISTS ix_outbox_messages_created_at ON outbox_messages (created_at)"))
+    else:
+        existing_outbox = {column["name"] for column in inspector.get_columns("outbox_messages")}
+        alter_statements = {
+            "to_address": "ALTER TABLE outbox_messages ADD COLUMN to_address TEXT",
+            "subject": "ALTER TABLE outbox_messages ADD COLUMN subject TEXT",
+            "body_html": "ALTER TABLE outbox_messages ADD COLUMN body_html TEXT",
+            "body_text": "ALTER TABLE outbox_messages ADD COLUMN body_text TEXT",
+            "payload": (
+                "ALTER TABLE outbox_messages ADD COLUMN payload JSONB NOT NULL DEFAULT '{}'::jsonb"
+                if engine.dialect.name != "sqlite"
+                else "ALTER TABLE outbox_messages ADD COLUMN payload JSON NOT NULL DEFAULT '{}'"
+            ),
+            "status": "ALTER TABLE outbox_messages ADD COLUMN status TEXT NOT NULL DEFAULT 'queued'",
+            "provider": "ALTER TABLE outbox_messages ADD COLUMN provider TEXT",
+            "provider_message_id": "ALTER TABLE outbox_messages ADD COLUMN provider_message_id TEXT",
+            "error": "ALTER TABLE outbox_messages ADD COLUMN error TEXT",
+            "queued_at": (
+                "ALTER TABLE outbox_messages ADD COLUMN queued_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP"
+                if engine.dialect.name != "sqlite"
+                else "ALTER TABLE outbox_messages ADD COLUMN queued_at DATETIME DEFAULT CURRENT_TIMESTAMP"
+            ),
+            "sent_at": (
+                "ALTER TABLE outbox_messages ADD COLUMN sent_at TIMESTAMP WITH TIME ZONE"
+                if engine.dialect.name != "sqlite"
+                else "ALTER TABLE outbox_messages ADD COLUMN sent_at DATETIME"
+            ),
+            "delivered_at": (
+                "ALTER TABLE outbox_messages ADD COLUMN delivered_at TIMESTAMP WITH TIME ZONE"
+                if engine.dialect.name != "sqlite"
+                else "ALTER TABLE outbox_messages ADD COLUMN delivered_at DATETIME"
+            ),
+        }
+        with engine.begin() as connection:
+            for column_name, ddl in alter_statements.items():
+                if column_name not in existing_outbox:
+                    connection.execute(text(ddl))
+            connection.execute(text("CREATE INDEX IF NOT EXISTS ix_outbox_messages_status ON outbox_messages (status)"))
+            connection.execute(text("CREATE INDEX IF NOT EXISTS ix_outbox_messages_created_at ON outbox_messages (created_at)"))
+
+    # -------------------- Message events --------------------
+    if "message_events" not in tables:
+        if engine.dialect.name == "sqlite":
+            create_events_sql = (
+                "CREATE TABLE message_events ("
+                "id TEXT PRIMARY KEY, "
+                "message_id TEXT REFERENCES outbox_messages(id) ON DELETE CASCADE, "
+                "type TEXT NOT NULL CHECK(type IN ('queued','sent','delivered','opened','clicked','bounced','failed')), "
+                "meta JSON NOT NULL DEFAULT '{}', "
+                "occurred_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP"
+                ")"
+            )
+        else:
+            create_events_sql = (
+                "CREATE TABLE message_events ("
+                "id UUID PRIMARY KEY DEFAULT gen_random_uuid(), "
+                "message_id UUID REFERENCES outbox_messages(id) ON DELETE CASCADE, "
+                "type TEXT NOT NULL CHECK(type IN ('queued','sent','delivered','opened','clicked','bounced','failed')), "
+                "meta JSONB NOT NULL DEFAULT '{}'::jsonb, "
+                "occurred_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP"
+                ")"
+            )
+        with engine.begin() as connection:
+            connection.execute(text(create_events_sql))
+            connection.execute(text("CREATE INDEX IF NOT EXISTS ix_message_events_message_id ON message_events (message_id)"))
+            connection.execute(text("CREATE INDEX IF NOT EXISTS ix_message_events_type ON message_events (type)"))
+
+    # -------------------- Contractor prospects --------------------
+    if "contractor_prospects" not in tables:
+        if engine.dialect.name == "sqlite":
+            create_cp_sql = (
+                "CREATE TABLE contractor_prospects ("
+                "id TEXT PRIMARY KEY, "
+                "company_name TEXT NOT NULL, "
+                "contact_name TEXT, "
+                "email TEXT, "
+                "phone TEXT, "
+                "website TEXT, "
+                "address TEXT, "
+                "city TEXT, "
+                "state TEXT, "
+                "postal_code TEXT, "
+                "source TEXT NOT NULL, "
+                "identity_hash TEXT NOT NULL UNIQUE, "
+                "score REAL, "
+                "tags JSON NOT NULL DEFAULT '{}', "
+                "enriched JSON NOT NULL DEFAULT '{}', "
+                "status TEXT NOT NULL DEFAULT 'new', "
+                "sequence_stage INTEGER NOT NULL DEFAULT 0, "
+                "first_seen DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, "
+                "last_seen DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, "
+                "last_contacted_at DATETIME, "
+                "next_contact_at DATETIME, "
+                "reply_status TEXT, "
+                "last_reply_at DATETIME, "
+                "metadata JSON NOT NULL DEFAULT '{}'"
+                ")"
+            )
+        else:
+            create_cp_sql = (
+                "CREATE TABLE contractor_prospects ("
+                "id UUID PRIMARY KEY DEFAULT gen_random_uuid(), "
+                "company_name TEXT NOT NULL, "
+                "contact_name TEXT, "
+                "email TEXT, "
+                "phone TEXT, "
+                "website TEXT, "
+                "address TEXT, "
+                "city TEXT, "
+                "state TEXT, "
+                "postal_code TEXT, "
+                "source TEXT NOT NULL, "
+                "identity_hash TEXT NOT NULL UNIQUE, "
+                "score NUMERIC, "
+                "tags JSONB NOT NULL DEFAULT '{}'::jsonb, "
+                "enriched JSONB NOT NULL DEFAULT '{}'::jsonb, "
+                "status TEXT NOT NULL DEFAULT 'new', "
+                "sequence_stage INTEGER NOT NULL DEFAULT 0, "
+                "first_seen TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP, "
+                "last_seen TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP, "
+                "last_contacted_at TIMESTAMP WITH TIME ZONE, "
+                "next_contact_at TIMESTAMP WITH TIME ZONE, "
+                "reply_status TEXT, "
+                "last_reply_at TIMESTAMP WITH TIME ZONE, "
+                "metadata JSONB NOT NULL DEFAULT '{}'::jsonb"
+                ")"
+            )
+        with engine.begin() as connection:
+            connection.execute(text(create_cp_sql))
+            connection.execute(text("CREATE INDEX IF NOT EXISTS ix_contractor_prospects_status ON contractor_prospects (status)"))
+            connection.execute(text("CREATE INDEX IF NOT EXISTS ix_contractor_prospects_city_state ON contractor_prospects (city, state)"))
+            connection.execute(text("CREATE INDEX IF NOT EXISTS ix_contractor_prospects_score ON contractor_prospects (score)"))
+
+    if "contractor_prospect_events" not in tables:
+        if engine.dialect.name == "sqlite":
+            create_cpe_sql = (
+                "CREATE TABLE contractor_prospect_events ("
+                "id TEXT PRIMARY KEY, "
+                "prospect_id TEXT NOT NULL REFERENCES contractor_prospects(id) ON DELETE CASCADE, "
+                "type TEXT NOT NULL, "
+                "payload JSON NOT NULL DEFAULT '{}', "
+                "occurred_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP"
+                ")"
+            )
+        else:
+            create_cpe_sql = (
+                "CREATE TABLE contractor_prospect_events ("
+                "id UUID PRIMARY KEY DEFAULT gen_random_uuid(), "
+                "prospect_id UUID NOT NULL REFERENCES contractor_prospects(id) ON DELETE CASCADE, "
+                "type TEXT NOT NULL, "
+                "payload JSONB NOT NULL DEFAULT '{}'::jsonb, "
+                "occurred_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP"
+                ")"
+            )
+        with engine.begin() as connection:
+            connection.execute(text(create_cpe_sql))
+            connection.execute(text("CREATE INDEX IF NOT EXISTS ix_contractor_prospect_events_prospect ON contractor_prospect_events (prospect_id)"))
+            connection.execute(text("CREATE INDEX IF NOT EXISTS ix_contractor_prospect_events_type ON contractor_prospect_events (type)"))
+    else:
+        existing_message_events = {column["name"] for column in inspector.get_columns("message_events")}
+        with engine.begin() as connection:
+            if "meta" not in existing_message_events:
+                connection.execute(
+                    text(
+                        "ALTER TABLE message_events ADD COLUMN meta "
+                        + ("JSONB NOT NULL DEFAULT '{}'::jsonb" if engine.dialect.name != "sqlite" else "JSON NOT NULL DEFAULT '{}'" )
+                    )
+                )
+            if "occurred_at" not in existing_message_events:
+                connection.execute(
+                    text(
+                        "ALTER TABLE message_events ADD COLUMN occurred_at "
+                        + ("TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP"
+                           if engine.dialect.name != "sqlite"
+                           else "DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP")
+                    )
+                )
+            connection.execute(text("CREATE INDEX IF NOT EXISTS ix_message_events_message_id ON message_events (message_id)"))
+            connection.execute(text("CREATE INDEX IF NOT EXISTS ix_message_events_type ON message_events (type)"))
+            connection.execute(text("CREATE UNIQUE INDEX IF NOT EXISTS ix_public_shares_token ON public_shares (token)"))
+
 
 try:
     _ensure_schema()
@@ -106,8 +600,3 @@ def get_db():
         yield db
     finally:
         db.close()
-
-
-
-
-

@@ -13,7 +13,7 @@ class CityProcessor:
     
     def __init__(self):
         self.service_urls = {
-            'scraper': 'http://scraper-service:8002',
+            'scraper': 'http://scraper-service:8011',
             'enrichment': 'http://enrichment-service:8004',
             'lead_generator': 'http://lead-generator:8008'
         }

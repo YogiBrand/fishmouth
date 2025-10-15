@@ -1,4 +1,4 @@
-import React, { useMemo } from 'react';
+import React, { useMemo, useState } from 'react';
 import { resolveReportTokens } from '../utils/reportTokens';
 
 const SECTION_LABELS = {
@@ -98,6 +98,8 @@ const ReportCanvas = ({
     });
   }, [content, config, businessProfile, lead, resolvedContentOverride]);
 
+  const [overlayVisible, setOverlayVisible] = useState(true);
+
   const activeSections = useMemo(() => {
     const sectionsConfig = config?.sections || {};
     const entries = Object.entries(sectionsConfig)
@@ -113,6 +115,25 @@ const ReportCanvas = ({
   const company = businessProfile?.company || {};
   const branding = businessProfile?.branding || {};
   const services = businessProfile?.services || {};
+
+  const baseRoofImage =
+    lead?.roof_intelligence?.roof_view?.image_url ||
+    lead?.ai_analysis?.imagery?.normalized_view_url ||
+    lead?.aerial_image_url ||
+    null;
+  const rawOverlayImage =
+    lead?.overlay_url ||
+    lead?.roof_intelligence?.heatmap?.url ||
+    lead?.ai_analysis?.imagery?.overlay_url ||
+    lead?.ai_analysis?.imagery?.heatmap_url ||
+    null;
+  const overlayImage = overlayVisible ? rawOverlayImage : null;
+  const confidenceScore = lead?.analysis_confidence ?? lead?.ai_analysis?.confidence ?? null;
+  const confidenceBadge = confidenceScore !== null ? (
+    <span className="inline-flex items-center gap-2 px-3 py-1 text-xs font-semibold rounded-full bg-sky-500/10 text-sky-700 border border-sky-500/20">
+      Confidence {Math.round(Math.min(Math.max(confidenceScore, 0), 0.995) * 100)}%
+    </span>
+  ) : null;
 
   const heroDetails = [
     lead?.address || lead?.property_address,
@@ -188,6 +209,34 @@ const ReportCanvas = ({
       </div>
 
       <div className="p-8 space-y-10">
+        {baseRoofImage && (
+          <div className="relative overflow-hidden rounded-3xl border border-gray-200 bg-gray-50 aspect-[16/9]">
+            <img src={baseRoofImage} alt="Roof imagery" className="w-full h-full object-cover" />
+            {overlayImage && (
+              <img
+                src={overlayImage}
+                alt="AI overlay"
+                className="absolute inset-0 w-full h-full object-cover mix-blend-screen opacity-85"
+              />
+            )}
+            <div className="absolute top-4 left-4 inline-flex items-center gap-2 px-3 py-1 text-xs font-semibold rounded-full bg-slate-900/85 text-white uppercase tracking-wide">
+              Roof Intelligence Overlay
+            </div>
+            <div className="absolute top-4 right-4 flex items-center gap-2 flex-wrap justify-end">
+              {rawOverlayImage && (
+                <button
+                  type="button"
+                  onClick={() => setOverlayVisible((prev) => !prev)}
+                  className="inline-flex items-center gap-2 px-3 py-1.5 text-xs font-semibold rounded-full bg-white/85 text-gray-700 border border-gray-200 shadow-sm hover:bg-white"
+                >
+                  {overlayVisible ? 'Hide Overlay' : 'Show Overlay'}
+                </button>
+              )}
+              {confidenceBadge}
+            </div>
+          </div>
+        )}
+
         {activeSections.map((sectionKey) => {
           if (sectionKey === 'before_after_gallery' && galleryImages.length) {
             return (

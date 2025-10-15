@@ -4,7 +4,8 @@ import {
   ArrowLeft, Edit3, Save, Download, Send,
   Loader, Copy, FileText, Sparkles, MessageSquare,
   CheckCircle, AlertCircle, DollarSign, Home,
-  Camera, Award, Target, Printer
+  Camera, Award, Target, Printer, Mail, Smartphone,
+  X
 } from 'lucide-react';
 import html2canvas from 'html2canvas';
 import jsPDF from 'jspdf';
@@ -23,6 +24,13 @@ const ReportPage = () => {
   const [editingSection, setEditingSection] = useState(null);
   const [regenerating, setRegenerating] = useState(null);
   const [aiPrompt, setAiPrompt] = useState('');
+  const [sendDrawerOpen, setSendDrawerOpen] = useState(false);
+  const [sendChannel, setSendChannel] = useState('email');
+  const [emailDraft, setEmailDraft] = useState({ to: '', subject: '', body: '' });
+  const [smsDraft, setSmsDraft] = useState({ to: '', body: '' });
+  const [sendingMessage, setSendingMessage] = useState(false);
+  const [sendWarnings, setSendWarnings] = useState([]);
+  const [shareLink, setShareLink] = useState(null);
   const reportRef = useRef(null);
 
   const effectiveBusinessProfile = useMemo(() => {
@@ -41,6 +49,17 @@ const ReportPage = () => {
       lead,
     });
   }, [report, effectiveBusinessProfile, lead]);
+
+  const leadName = useMemo(() => lead?.homeowner_name || lead?.name || 'there', [lead]);
+  const leadEmail = useMemo(() => lead?.homeowner_email || lead?.email || '', [lead]);
+  const leadPhone = useMemo(() => lead?.homeowner_phone || lead?.phone || '', [lead]);
+  const companyName = useMemo(() => {
+    const company = effectiveBusinessProfile?.company || effectiveBusinessProfile?.business;
+    return company?.name || 'Fish Mouth Roofing';
+  }, [effectiveBusinessProfile]);
+
+  const SHORTLINK_TOKEN = '{{shortlink}}';
+  const SHORTLINK_REGEX = /{{shortlink}}/g;
 
   const sectionOrder = useMemo(() => {
     if (report?.config?.sections) {
@@ -220,68 +239,169 @@ const ReportPage = () => {
     window.print();
   };
 
-  // Send report to lead
-  const sendReport = async () => {
-    if (!report) return;
-    setLoading(true);
+  const ensureShareLink = useCallback(async () => {
+    let sharePath = report?.share_url;
+    if (!sharePath) {
+      const response = await fetch(`/api/v1/reports/${reportId}/share`, { method: 'POST' });
+      if (!response.ok) {
+        throw new Error('Unable to create share link');
+      }
+      const data = await response.json();
+      sharePath = data.share_url;
+      setReport((prev) => ({ ...prev, share_url: data.share_url }));
+    }
+    const effectivePath = sharePath || `/reports/view/${reportId}`;
+    const absolute = `${window.location.origin}${effectivePath}`;
+    setShareLink(absolute);
+    return { relative: effectivePath, absolute };
+  }, [report?.share_url, reportId]);
+
+  // Copy shareable link
+  const copyShareableLink = async () => {
     try {
-      const response = await fetch(`/api/v1/reports/${reportId}/send`, {
+      const { absolute } = await ensureShareLink();
+      await navigator.clipboard.writeText(absolute);
+      toast.success('Shareable link copied to clipboard');
+    } catch (error) {
+      console.error('Failed to copy share link', error);
+      toast.error('Unable to copy share link');
+    }
+  };
+
+  const openSendDrawer = async (channel = 'email') => {
+    try {
+      const { absolute } = await ensureShareLink();
+      const defaultEmailBody = `Hi ${leadName},\n\nYour personalized roof report is ready. View it here: ${SHORTLINK_TOKEN}\n\nDownload the PDF anytime.\n\n– ${companyName}`;
+      const defaultSmsBody = `Hi ${leadName}, your roof report is ready: ${SHORTLINK_TOKEN}`;
+      setEmailDraft({
+        to: leadEmail || '',
+        subject: `Your roof report for ${lead?.address || 'your home'}`,
+        body: defaultEmailBody,
+      });
+      setSmsDraft({
+        to: leadPhone || '',
+        body: defaultSmsBody,
+      });
+      const warnings = [];
+      if (channel === 'email' && !leadEmail) {
+        warnings.push('Lead does not have an email address on file.');
+      }
+      if (channel === 'sms' && !leadPhone) {
+        warnings.push('Lead does not have a mobile number on file.');
+      }
+      setSendWarnings(warnings);
+      setShareLink(absolute);
+      setSendChannel(channel);
+      setSendDrawerOpen(true);
+    } catch (error) {
+      console.error('Failed to prepare send drawer', error);
+      toast.error('Unable to prepare send drawer');
+    }
+  };
+
+  const handleSendMessage = async () => {
+    const isEmail = sendChannel === 'email';
+    const draft = isEmail ? emailDraft : smsDraft;
+    if (!draft.to) {
+      toast.error('Recipient is required');
+      return;
+    }
+
+    setSendingMessage(true);
+    try {
+      const { relative, absolute } = await ensureShareLink();
+      const attachments = [];
+      if (report?.pdf_url) {
+        attachments.push({
+          filename: `${reportId}.pdf`,
+          type: 'application/pdf',
+          source: 'report_pdf',
+          url: report.pdf_url,
+        });
+      }
+
+      const payload = {
+        channel: sendChannel,
+        to: draft.to,
+        attachments,
+        context: {
+          report_id: reportId,
+          lead_id: report?.lead_id,
+          share_url: relative,
+          absolute_share_url: absolute,
+          pdf_url: report?.pdf_url,
+        },
+        metadata: {
+          report_title: report?.config?.title || report?.config?.name || 'Roof Report',
+          lead_name: leadName,
+          channel: sendChannel,
+        },
+      };
+
+      if (isEmail) {
+        payload.subject = emailDraft.subject || `Roof report from ${companyName}`;
+        payload.text = emailDraft.body;
+        payload.html = emailDraft.body
+          .replace(SHORTLINK_REGEX, '<a href="{{shortlink}}">{{shortlink}}</a>')
+          .replace(/\n/g, '<br/>');
+      } else {
+        payload.text = smsDraft.body;
+      }
+
+      const response = await fetch('/api/v1/outbox/send', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          lead_id: report.lead_id,
-          method: 'email' // Could be expanded to include SMS, etc.
-        })
+        body: JSON.stringify(payload),
       });
+      const data = await response.json();
+      if (!response.ok) {
+        throw new Error(data?.detail || 'Failed to queue message');
+      }
 
-      if (response.ok) {
-        toast.success('Report sent successfully');
-        
-        // Create activity entry
+      if (Array.isArray(data?.warnings)) {
+        data.warnings.forEach((warning) => toast.error(warning));
+      }
+
+      toast.success('Message queued for delivery');
+      setSendDrawerOpen(false);
+
+      if (report?.lead_id) {
         await fetch('/api/v1/activity', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             type: 'report_sent',
             title: 'Report Sent to Lead',
-            message: `${report.config.type.replace('-', ' ')} report sent to ${lead?.homeowner_name || lead?.name || 'lead'}`,
+            message: `${sendChannel.toUpperCase()} report sent to ${leadName}`,
             lead_id: report.lead_id,
-            report_id: reportId
-          })
+            report_id: reportId,
+          }),
         });
-      } else {
-        throw new Error('Send failed');
       }
     } catch (error) {
       console.error('Send error:', error);
-      toast.error('Failed to send report');
+      toast.error(error.message || 'Failed to send report');
     } finally {
-      setLoading(false);
+      setSendingMessage(false);
     }
   };
 
-  // Copy shareable link
-  const copyShareableLink = async () => {
-    try {
-      let sharePath = report?.share_url;
-
-      if (!sharePath) {
-        const response = await fetch(`/api/v1/reports/${reportId}/share`, { method: 'POST' });
-        if (response.ok) {
-          const data = await response.json();
-          sharePath = data.share_url;
-          setReport((prev) => ({ ...prev, share_url: data.share_url }));
-        }
-      }
-
-      const effectivePath = sharePath || `/reports/view/${reportId}`;
-      const shareUrl = `${window.location.origin}${effectivePath}`;
-      await navigator.clipboard.writeText(shareUrl);
-      toast.success('Shareable link copied to clipboard');
-    } catch (error) {
-      console.error('Failed to copy share link', error);
-      toast.error('Unable to copy share link');
+  const handleChannelSelect = (channel) => {
+    setSendChannel(channel);
+    const warnings = [];
+    if (channel === 'email' && !leadEmail) {
+      warnings.push('Lead does not have an email address on file.');
     }
+    if (channel === 'sms' && !leadPhone) {
+      warnings.push('Lead does not have a mobile number on file.');
+    }
+    setSendWarnings(warnings);
+  };
+
+  const closeSendDrawer = () => {
+    if (sendingMessage) return;
+    setSendDrawerOpen(false);
+    setSendWarnings([]);
   };
 
   if (loading && !report) {
@@ -401,11 +521,10 @@ const ReportPage = () => {
                     <span>Edit</span>
                   </button>
                   <button
-                    onClick={sendReport}
-                    disabled={loading}
-                    className="flex items-center space-x-2 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors disabled:opacity-50"
+                    onClick={() => openSendDrawer('email')}
+                    className="flex items-center space-x-2 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors"
                   >
-                    {loading ? <Loader className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
+                    <Send className="w-4 h-4" />
                     <span>Send to Lead</span>
                   </button>
                 </>
@@ -539,6 +658,155 @@ const ReportPage = () => {
           </div>
         </div>
       </div>
+      {sendDrawerOpen && (
+        <div className="fixed inset-0 z-40 flex" role="dialog" aria-modal="true">
+          <div className="flex-1 bg-black/40" onClick={closeSendDrawer} />
+          <div
+            className="relative w-full max-w-md bg-white h-full shadow-2xl overflow-y-auto"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="flex items-center justify-between border-b border-gray-200 px-6 py-4">
+              <div>
+                <h2 className="text-lg font-semibold text-gray-900">Send Report</h2>
+                <p className="text-sm text-gray-500">
+                  Share this report with {leadName === 'there' ? 'the lead' : leadName} using email or SMS.
+                </p>
+              </div>
+              <button
+                onClick={closeSendDrawer}
+                className="p-2 rounded-full text-gray-500 hover:text-gray-700 hover:bg-gray-100 disabled:opacity-50"
+                aria-label="Close send drawer"
+                disabled={sendingMessage}
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            <div className="px-6 py-5 space-y-5">
+              <div className="flex gap-2">
+                <button
+                  onClick={() => handleChannelSelect('email')}
+                  className={`flex-1 inline-flex items-center justify-center gap-2 rounded-lg border px-3 py-2 text-sm font-medium transition ${sendChannel === 'email' ? 'border-blue-600 bg-blue-600 text-white shadow-sm' : 'border-gray-300 text-gray-700 hover:border-gray-400'}`}
+                >
+                  <Mail className="w-4 h-4" /> Email
+                </button>
+                <button
+                  onClick={() => handleChannelSelect('sms')}
+                  className={`flex-1 inline-flex items-center justify-center gap-2 rounded-lg border px-3 py-2 text-sm font-medium transition ${sendChannel === 'sms' ? 'border-blue-600 bg-blue-600 text-white shadow-sm' : 'border-gray-300 text-gray-700 hover:border-gray-400'}`}
+                >
+                  <Smartphone className="w-4 h-4" /> SMS
+                </button>
+              </div>
+
+              {sendWarnings.length > 0 && (
+                <div className="rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-800">
+                  <ul className="list-disc pl-5 space-y-1">
+                    {sendWarnings.map((warning, index) => (
+                      <li key={index}>{warning}</li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+
+              {shareLink && (
+                <div className="rounded-lg border border-gray-200 bg-gray-50 px-3 py-3 text-sm text-gray-600">
+                  <div className="font-semibold text-gray-800 mb-1">Preview link</div>
+                  <div className="truncate text-xs font-mono text-gray-600">{shareLink}</div>
+                  <p className="mt-2 text-xs text-gray-500">
+                    Placeholder <span className="font-mono text-gray-700">{SHORTLINK_TOKEN}</span> resolves to a tracked short link for engagement analytics.
+                  </p>
+                </div>
+              )}
+
+              {report?.pdf_url && (
+                <div className="flex items-center gap-2 text-sm text-gray-600">
+                  <FileText className="w-4 h-4 text-gray-500" />
+                  <span>Report PDF will be attached automatically.</span>
+                </div>
+              )}
+
+              {sendChannel === 'email' ? (
+                <div className="space-y-4">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Recipient email</label>
+                    <input
+                      type="email"
+                      value={emailDraft.to}
+                      onChange={(event) => setEmailDraft((prev) => ({ ...prev, to: event.target.value }))}
+                      className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      placeholder="lead@example.com"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Subject</label>
+                    <input
+                      type="text"
+                      value={emailDraft.subject}
+                      onChange={(event) => setEmailDraft((prev) => ({ ...prev, subject: event.target.value }))}
+                      className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      placeholder="Your roof report"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Message</label>
+                    <textarea
+                      rows={8}
+                      value={emailDraft.body}
+                      onChange={(event) => setEmailDraft((prev) => ({ ...prev, body: event.target.value }))}
+                      className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    />
+                    <p className="mt-2 text-xs text-gray-500">
+                      Use <span className="font-mono text-gray-700">{SHORTLINK_TOKEN}</span> to insert a tracked link in the email body.
+                    </p>
+                  </div>
+                </div>
+              ) : (
+                <div className="space-y-4">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Recipient number</label>
+                    <input
+                      type="tel"
+                      value={smsDraft.to}
+                      onChange={(event) => setSmsDraft((prev) => ({ ...prev, to: event.target.value }))}
+                      className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      placeholder="+15551234567"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Message</label>
+                    <textarea
+                      rows={4}
+                      value={smsDraft.body}
+                      onChange={(event) => setSmsDraft((prev) => ({ ...prev, body: event.target.value }))}
+                      className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    />
+                    <p className="mt-2 text-xs text-gray-500">
+                      SMS length is limited. Placeholder <span className="font-mono text-gray-700">{SHORTLINK_TOKEN}</span> is replaced automatically.
+                    </p>
+                  </div>
+                </div>
+              )}
+
+              <div className="flex items-center justify-between gap-3 border-t border-gray-100 pt-4">
+                <button
+                  onClick={closeSendDrawer}
+                  disabled={sendingMessage}
+                  className="inline-flex items-center justify-center px-4 py-2 text-sm font-medium text-gray-600 rounded-lg border border-gray-300 hover:bg-gray-50 disabled:opacity-50"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={handleSendMessage}
+                  disabled={sendingMessage}
+                  className="inline-flex items-center justify-center gap-2 rounded-lg bg-green-600 px-4 py-2 text-sm font-semibold text-white hover:bg-green-700 disabled:opacity-50"
+                >
+                  {sendingMessage ? <Loader className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
+                  <span>Queue {sendChannel === 'email' ? 'Email' : 'SMS'}</span>
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

@@ -1,13 +1,14 @@
 """
-System health monitoring and alerting
+System health monitoring and alerting.
 """
-import logging
-import httpx
-from typing import Dict, Any, List
 import asyncio
 from datetime import datetime, timedelta
+from typing import Dict, Any, List
 
-logger = logging.getLogger(__name__)
+import httpx
+import structlog
+
+logger = structlog.get_logger("orchestrator.health")
 
 class HealthMonitor:
     """Monitors health of all services in the system"""
@@ -15,27 +16,27 @@ class HealthMonitor:
     def __init__(self):
         self.services = {
             'scraper': {
-                'url': 'http://scraper-service:8002/health',
+                'url': 'http://scraper-service:8011/readyz',
                 'timeout': 10,
                 'critical': True
             },
             'enrichment': {
-                'url': 'http://enrichment-service:8004/health', 
+                'url': 'http://enrichment-service:8004/readyz', 
                 'timeout': 10,
                 'critical': True
             },
             'lead_generator': {
-                'url': 'http://lead-generator:8008/health',
+                'url': 'http://lead-generator:8008/readyz',
                 'timeout': 10,
                 'critical': True
             },
             'main_backend': {
-                'url': 'http://backend:8000/health',
+                'url': 'http://backend:8000/readyz',
                 'timeout': 10,
                 'critical': True
             },
             'voice_server': {
-                'url': 'http://voice-server:8001/health',
+                'url': 'http://voice-server:8001/readyz',
                 'timeout': 10,
                 'critical': False  # Optional service
             },
@@ -55,7 +56,7 @@ class HealthMonitor:
     async def check_system_health(self) -> Dict[str, Any]:
         """Comprehensive system health check"""
         try:
-            logger.info("🔍 Running comprehensive system health check")
+            logger.info("system_health.check.start")
             
             health_results = {
                 'timestamp': datetime.utcnow().isoformat(),
@@ -91,11 +92,15 @@ class HealthMonitor:
                 if not database_results.get('healthy', False):
                     health_results['critical_issues'].append('database_connection')
             
-            logger.info(f"✅ Health check completed. Overall healthy: {health_results['overall_healthy']}")
+            logger.info(
+                "system_health.check.complete",
+                overall_healthy=health_results['overall_healthy'],
+                critical_issues=health_results['critical_issues'],
+            )
             return health_results
             
         except Exception as e:
-            logger.error(f"❌ Health check failed: {e}")
+            logger.error("system_health.check.failed", error=str(e))
             return {
                 'timestamp': datetime.utcnow().isoformat(),
                 'overall_healthy': False,

@@ -46,6 +46,9 @@ import EnhancedReportGenerator from '../components/EnhancedReportGenerator';
 import PointsLedgerModal from '../components/PointsLedgerModal';
 import WalletRewardsModal from '../components/WalletRewardsModal';
 import ManualReviewModal from '../components/ManualReviewModal';
+import DashboardKpiRow from '../components/DashboardKpiRow';
+import LeadQueueTabs from '../components/LeadQueueTabs';
+import WelcomeCelebration from '../components/WelcomeCelebration';
 import { leadAPI } from '../services/api';
 import businessProfileService from '../services/businessProfileService';
 import { getLeadUrgency, formatLeadAgeLabel, resolveLeadCreatedAt } from '../utils/leads';
@@ -60,6 +63,19 @@ const CREDIT_PRICING = {
   sms: { label: 'AI SMS', cost: 0.08, apiCost: 0.02, unit: 'message' },
   email: { label: 'AI Email', cost: 0.09, apiCost: 0.0225, unit: 'email' },
   leads: { label: 'AI Hot Lead', cost: 45, apiCost: 12, unit: 'lead' },
+};
+
+const DEFAULT_APP_CONFIG = {
+  featureFlags: { reports: true, voice: true, scanner: true, roi: true },
+  kpis: ['hot_leads_today', 'warm_leads_today', 'reports_sent_7d', 'views_7d', 'replies_7d', 'appointments_7d'],
+  leadTableColumns: ['address', 'owner', 'verified_contacts', 'roof_age', 'priority', 'confidence', 'reason_codes', 'last_activity', 'next_step'],
+  leadQueueTabs: [
+    { id: 'hot', label: 'HOT' },
+    { id: 'warm', label: 'WARM' },
+    { id: 'followups', label: 'Follow-ups' },
+    { id: 'unreached', label: 'Unreached' },
+    { id: 'dnc', label: 'DNC' },
+  ],
 };
 
 const MAX_HERO_LEADS = 20;
@@ -405,11 +421,19 @@ export default function Dashboard() {
   const [activeView, setActiveView] = useState('dashboard');
   const [selectedLead, setSelectedLead] = useState(null);
   const [stats, setStats] = useState(null);
+  const [appConfig, setAppConfig] = useState(DEFAULT_APP_CONFIG);
+  const [kpiData, setKpiData] = useState({});
+  const [leadQueue, setLeadQueue] = useState({});
   const [hotLeads, setHotLeads] = useState([]);
   const [leadList, setLeadList] = useState([]);
   const [leadLoading, setLeadLoading] = useState(true);
   const [clusters, setClusters] = useState([]);
   const [activity, setActivity] = useState([]);
+  const [usageSummary, setUsageSummary] = useState({});
+  const [roiSummary, setRoiSummary] = useState(null);
+  const [dashboardErrors, setDashboardErrors] = useState([]);
+  const [taskReminders, setTaskReminders] = useState([]);
+  const [summaryGeneratedAt, setSummaryGeneratedAt] = useState(null);
   const [loading, setLoading] = useState(true);
   const [sequences, setSequences] = useState([]);
   const [sequenceModal, setSequenceModal] = useState({ open: false, lead: null, sequenceId: '' });
@@ -434,6 +458,8 @@ export default function Dashboard() {
   const [showEnhancedReportGenerator, setShowEnhancedReportGenerator] = useState(false);
   const [generatorLeadOverride, setGeneratorLeadOverride] = useState(null);
   const [businessProfile, setBusinessProfile] = useState(null);
+  const [showWelcomeCelebration, setShowWelcomeCelebration] = useState(false);
+  const [welcomeReward, setWelcomeReward] = useState(null);
   const [redeemedLeads, setRedeemedLeads] = useState(() => getStoredNumber('fm_redeemed_leads', 0));
   const [walletBalance, setWalletBalance] = useState(() => getStoredNumber('fm_wallet_balance', 0));
   const [creditBuckets, setCreditBuckets] = useState(() => {
@@ -584,6 +610,26 @@ export default function Dashboard() {
     });
   }, [user?.email]);
 
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const storedReward = window.localStorage.getItem('fm_onboarding_reward');
+    const welcomeShown = window.localStorage.getItem('fm_onboarding_welcome_shown') === '1';
+    if (!storedReward) {
+      setWelcomeReward(null);
+      setShowWelcomeCelebration(false);
+      return;
+    }
+    try {
+      const parsed = JSON.parse(storedReward);
+      setWelcomeReward(parsed);
+      setShowWelcomeCelebration(!welcomeShown);
+    } catch (error) {
+      console.warn('welcome reward parse error', error);
+      setWelcomeReward(null);
+      setShowWelcomeCelebration(false);
+    }
+  }, [user?.id]);
+
   const logPointEvent = useCallback(
     (amount, reason, meta = {}) => {
       const entry = {
@@ -653,6 +699,13 @@ export default function Dashboard() {
     setTimeout(() => {
       setPointBursts((prev) => prev.filter((burst) => burst.id !== id));
     }, 1800);
+  }, []);
+
+  const dismissWelcomeCelebration = useCallback(() => {
+    if (typeof window !== 'undefined') {
+      window.localStorage.setItem('fm_onboarding_welcome_shown', '1');
+    }
+    setShowWelcomeCelebration(false);
   }, []);
 
   const registerLeadReward = useCallback((leadId) => {
@@ -1022,6 +1075,7 @@ const notifications = useMemo(() => {
       ? 'All intelligence for this property in one dossier'
       : activeNav?.description || 'Navigate the platform';
   useEffect(() => {
+    loadAppConfig();
     refreshData();
     
     // Only attempt WebSocket connection if not in development or if endpoint exists
@@ -1457,7 +1511,7 @@ const notifications = useMemo(() => {
   const refreshData = async () => {
     setLoading(true);
     try {
-      await Promise.all([refreshStats(), refreshHotLeads(), refreshLeadList(), refreshClusters(), refreshActivity()]);
+      await Promise.all([refreshStats(), refreshLeadList(), refreshActivity()]);
     } catch (error) {
       console.error('Failed to refresh data:', error);
       // Load mock data on error
@@ -1491,6 +1545,47 @@ const notifications = useMemo(() => {
       ]
     });
 
+    setKpiData({
+      hot_leads_today: { label: 'Hot Leads (Today)', value: 9, period: '24h' },
+      warm_leads_today: { label: 'Warm Leads (Today)', value: 14, period: '24h' },
+      reports_sent_7d: { label: 'Reports Sent', value: 32, period: '7d' },
+      views_7d: { label: 'Report Views', value: 76, period: '7d' },
+      replies_7d: { label: 'Replies / Clicks', value: 21, period: '7d' },
+      appointments_7d: { label: 'Appointments', value: 11, period: '7d' },
+    });
+    setUsageSummary({
+      voice_minutes: { quantity: 184, cost: 36.8 },
+      sms_messages: { quantity: 245, cost: 19.6 },
+      emails_sent: { quantity: 420, cost: 37.8 },
+    });
+    setRoiSummary({
+      spend_last_30: 420,
+      pipeline_value: 128000,
+      closed_value: 38500,
+      roi_percent: 204,
+    });
+    setDashboardErrors([
+      { type: 'message.bounced', count: 2, last_seen: new Date().toISOString() },
+      { type: 'call.failed', count: 1, last_seen: new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString() },
+    ]);
+    setTaskReminders([
+      {
+        id: 'task-followup-1',
+        lead_id: 1,
+        task_type: 'schedule_follow_up',
+        scheduled_for: new Date(Date.now() + 2 * 60 * 60 * 1000).toISOString(),
+        created_at: new Date().toISOString(),
+      },
+      {
+        id: 'task-inspection-1',
+        lead_id: 2,
+        task_type: 'inspection_site_walk',
+        scheduled_for: new Date(Date.now() + 20 * 60 * 60 * 1000).toISOString(),
+        created_at: new Date().toISOString(),
+      },
+    ]);
+    setSummaryGeneratedAt(new Date().toISOString());
+
     const now = new Date();
     const sampleHotLeads = [
       {
@@ -1500,6 +1595,7 @@ const notifications = useMemo(() => {
         phone: '(555) 123-4567',
         email: 'sarah.johnson@email.com',
         score: 95,
+        lead_score: 95,
         lead_source: 'Storm Activity',
         damage_estimate: 15000,
         last_contact: new Date(now.getTime() - 2 * 24 * 60 * 60 * 1000).toISOString(),
@@ -1521,6 +1617,7 @@ const notifications = useMemo(() => {
         phone: '(555) 987-6543',
         email: 'mike.chen@email.com',
         score: 88,
+        lead_score: 88,
         lead_source: 'Neighbor Activity',
         damage_estimate: 22000,
         last_contact: new Date(now.getTime() - 4 * 24 * 60 * 60 * 1000).toISOString(),
@@ -1542,6 +1639,7 @@ const notifications = useMemo(() => {
         phone: '(555) 555-0123',
         email: 'jennifer.williams@email.com',
         score: 92,
+        lead_score: 92,
         lead_source: 'Insurance Activity',
         damage_estimate: 18500,
         last_contact: new Date(now.getTime() - 24 * 60 * 60 * 1000).toISOString(),
@@ -1559,6 +1657,22 @@ const notifications = useMemo(() => {
     ];
 
     setHotLeads(sampleHotLeads);
+    setLeadQueue({
+      hot: { label: 'HOT', leads: sampleHotLeads },
+      warm: {
+        label: 'WARM',
+        leads: sampleHotLeads.map((lead, index) => ({
+          ...lead,
+          id: `warm-${index}`,
+          lead_score: (lead.score || 80) - 12,
+          lead_score_numeric: (lead.score || 80) - 12,
+          priority: 'warm',
+        })),
+      },
+      followups: { label: 'Follow-ups', leads: sampleHotLeads.slice(0, 2) },
+      unreached: { label: 'Unreached', leads: [] },
+      dnc: { label: 'DNC', leads: [] },
+    });
     setLeadList(
       sampleHotLeads.map((item, index) => ({
         id: item.id || index + 1,
@@ -1676,38 +1790,90 @@ const notifications = useMemo(() => {
     ]);
   };
 
+  const loadAppConfig = async () => {
+    try {
+      const token = localStorage.getItem('token');
+      const etag = localStorage.getItem('appConfigEtag');
+      const res = await fetch('/api/v1/app-config', {
+        headers: {
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+          ...(etag ? { 'If-None-Match': etag } : {}),
+        },
+      });
+      if (res.status === 304) {
+        return;
+      }
+      if (!res.ok) throw new Error('Failed to fetch app config');
+      const data = await res.json();
+      const config = {
+        featureFlags: data.featureFlags || DEFAULT_APP_CONFIG.featureFlags,
+        kpis: Array.isArray(data.kpis) && data.kpis.length ? data.kpis : DEFAULT_APP_CONFIG.kpis,
+        leadTableColumns:
+          Array.isArray(data.leadTableColumns) && data.leadTableColumns.length
+            ? data.leadTableColumns
+            : DEFAULT_APP_CONFIG.leadTableColumns,
+        leadQueueTabs:
+          Array.isArray(data.leadQueueTabs) && data.leadQueueTabs.length
+            ? data.leadQueueTabs
+            : DEFAULT_APP_CONFIG.leadQueueTabs,
+      };
+      setAppConfig(config);
+      const incomingEtag = res.headers.get('ETag');
+      if (incomingEtag) {
+        localStorage.setItem('appConfigEtag', incomingEtag);
+      }
+    } catch (error) {
+      console.error('Failed to load app config:', error);
+      setAppConfig(DEFAULT_APP_CONFIG);
+    }
+  };
+
+  const applyDashboardSummary = (data) => {
+    if (!data || typeof data !== 'object') return;
+    const metricsPayload = data.metrics || data;
+    if (metricsPayload) {
+      setStats(metricsPayload);
+    }
+    setKpiData(data.kpis || {});
+    setLeadQueue(data.lead_queue || {});
+    const hotBucket = data.lead_queue?.hot;
+    if (Array.isArray(hotBucket)) {
+      setHotLeads(hotBucket);
+    } else if (hotBucket?.leads) {
+      setHotLeads(hotBucket.leads);
+    } else if (Array.isArray(data.hot_leads)) {
+      setHotLeads(data.hot_leads);
+    }
+    if (Array.isArray(data.clusters)) {
+      setClusters(data.clusters);
+    }
+    setUsageSummary(data.usage || {});
+    setRoiSummary(data.roi || null);
+    setDashboardErrors(data.errors_24h || []);
+    setTaskReminders(data.tasks || []);
+    setSummaryGeneratedAt(data.generated_at || null);
+  };
+
   const refreshStats = async () => {
     try {
       const token = localStorage.getItem('token');
-      const res = await fetch('/api/v1/dashboard/stats', {
+      const res = await fetch('/api/v1/dashboard/summary?lead_limit=25', {
         headers: {
-          'Authorization': `Bearer ${token}`
-        }
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
       });
-      if (!res.ok) throw new Error('Failed to fetch stats');
+      if (!res.ok) throw new Error('Failed to fetch dashboard summary');
       const data = await res.json();
-      setStats(data);
+      applyDashboardSummary(data);
+      return data;
     } catch (error) {
-      console.error('Failed to fetch stats:', error);
+      console.error('Failed to fetch dashboard summary:', error);
       throw error;
     }
   };
 
   const refreshHotLeads = async () => {
-    try {
-      const token = localStorage.getItem('token');
-      const res = await fetch('/api/v1/dashboard/hot-leads?min_score=75&limit=50', {
-        headers: {
-          'Authorization': `Bearer ${token}`
-        }
-      });
-      if (!res.ok) throw new Error('Failed to fetch hot leads');
-      const data = await res.json();
-      setHotLeads(data.leads || []);
-    } catch (error) {
-      console.error('Failed to fetch hot leads:', error);
-      throw error;
-    }
+    await refreshStats();
   };
 
   const refreshLeadList = async () => {
@@ -1729,34 +1895,17 @@ const notifications = useMemo(() => {
     }
   };
 
-  const refreshClusters = async () => {
-    try {
-      const token = localStorage.getItem('token');
-      const res = await fetch('/api/v1/dashboard/active-clusters?limit=25', {
-        headers: {
-          'Authorization': `Bearer ${token}`
-        }
-      });
-      if (!res.ok) throw new Error('Failed to fetch clusters');
-      const data = await res.json();
-      setClusters(data.clusters || []);
-    } catch (error) {
-      console.error('Failed to fetch clusters:', error);
-      throw error;
-    }
-  };
-
   const refreshActivity = async () => {
     try {
       const token = localStorage.getItem('token');
-      const res = await fetch('/api/v1/dashboard/activity?limit=20', {
+      const res = await fetch('/api/v1/activity?limit=20', {
         headers: {
-          'Authorization': `Bearer ${token}`
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
         }
       });
       if (!res.ok) throw new Error('Failed to fetch activity');
       const data = await res.json();
-      setActivity(data.activity || []);
+      setActivity(data.events || data.activity || []);
     } catch (error) {
       console.error('Failed to fetch activity:', error);
       throw error;
@@ -2279,7 +2428,16 @@ const notifications = useMemo(() => {
         const respondMessage =
           primaryUrgency?.message ||
           'Industry benchmark: 54% of homeowners expect a response within 48 hours.';
-        const roi = stats?.roi ?? stats?.estimated_roi ?? 0;
+        const roiData = roiSummary || {
+          spend_last_30: stats?.spend_last_30 ?? 0,
+          pipeline_value: stats?.pipeline_value ?? 0,
+          closed_value: stats?.closed_value ?? 0,
+          roi_percent: stats?.roi ?? stats?.estimated_roi ?? null,
+        };
+        const roi = roiData?.roi_percent ?? 0;
+        const upcomingTasks = (taskReminders || []).slice(0, 4);
+        const errorItems = (dashboardErrors || []).slice(0, 4);
+        const usageEntries = Object.entries(usageSummary || {}).slice(0, 3);
         const daysToBonus = streak > 0 ? (streak % 7 === 0 ? 0 : 7 - (streak % 7)) : 7;
         const todayKey = getTodayKey();
         const streakQuestId = `daily.streak.${todayKey}`;
@@ -2390,6 +2548,24 @@ const notifications = useMemo(() => {
         const emailDisabled = !leadForEmail;
         return (
           <div className="space-y-8">
+            <div className="space-y-4">
+              <DashboardKpiRow kpiConfig={appConfig.kpis} kpiData={kpiData} isDark={isDark} />
+              <LeadQueueTabs
+                tabs={appConfig.leadQueueTabs}
+                leadQueue={leadQueue}
+                columns={appConfig.leadTableColumns}
+                isDark={isDark}
+                onOpenLead={handleInspectLead}
+                onCallLead={handleCallLeadDirect}
+                onAssignSequence={handleAssignSequence}
+                onGenerateReport={handleGenerateReport}
+              />
+              {summaryGeneratedAt && (
+                <div className={`text-xs text-right ${mutedClass}`}>
+                  Updated {new Date(summaryGeneratedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                </div>
+              )}
+            </div>
             <div className="space-y-4">
               <div className="bg-gradient-to-r from-red-500 to-orange-500 p-5 rounded-3xl shadow-lg text-white flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
                 <div className="flex items-start gap-3">
@@ -2528,6 +2704,67 @@ const notifications = useMemo(() => {
                 isDark={isDark}
               />
             )}
+
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+              <div className={`${surfaceClass(isDark)} p-6 space-y-2`}>
+                <div className={`text-sm font-semibold uppercase tracking-wide ${headingClass}`}>ROI Snapshot</div>
+                <div className={`text-3xl font-bold ${headingClass}`}>
+                  {roiData?.roi_percent != null ? `${roiData.roi_percent.toFixed(1)}%` : '—'}
+                </div>
+                <div className={`text-xs ${mutedClass}`}>30-day spend {currencyFormatter.format(roiData?.spend_last_30 || 0)}</div>
+                <div className={`text-xs ${mutedClass}`}>Pipeline value {currencyFormatter.format(roiData?.pipeline_value || 0)}</div>
+                <div className={`text-xs ${mutedClass}`}>Closed last 30 days {currencyFormatter.format(roiData?.closed_value || 0)}</div>
+              </div>
+
+              <div className={`${surfaceClass(isDark)} p-6 space-y-3`}>
+                <div className={`text-sm font-semibold uppercase tracking-wide ${headingClass}`}>Task Queue</div>
+                {upcomingTasks.length === 0 ? (
+                  <p className={`text-sm ${mutedClass}`}>No tasks queued—great job keeping things current.</p>
+                ) : (
+                  <ul className="space-y-2">
+                    {upcomingTasks.map((task) => (
+                      <li key={task.id} className={`${isDark ? 'bg-slate-900/60' : 'bg-gray-50'} rounded-xl px-3 py-2`}> 
+                        <div className={`text-xs font-semibold ${headingClass}`}>{(task.task_type || 'Task').replace(/_/g, ' ')}</div>
+                        <div className={`text-xs ${mutedClass}`}>
+                          Due {task.scheduled_for ? formatRelativeTime(new Date(task.scheduled_for).getTime()) : 'soon'}
+                        </div>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+
+              <div className={`${surfaceClass(isDark)} p-6 space-y-3`}>
+                <div className={`text-sm font-semibold uppercase tracking-wide ${headingClass}`}>System Health</div>
+                {errorItems.length === 0 ? (
+                  <p className={`text-sm ${mutedClass}`}>No delivery issues detected in the last 24 hours.</p>
+                ) : (
+                  <ul className="space-y-2">
+                    {errorItems.map((error) => (
+                      <li key={error.type} className="text-xs">
+                        <span className="font-semibold text-red-500 mr-2">{error.type.replace(/[_\.]/g, ' ')}</span>
+                        <span className={mutedClass}>×{error.count} • {error.last_seen ? formatRelativeTime(new Date(error.last_seen).getTime()) : 'recent'}</span>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+                {usageEntries.length > 0 && (
+                  <div className="pt-2 border-t border-dashed border-slate-200 dark:border-slate-700">
+                    <div className={`text-xs font-semibold mb-1 ${headingClass}`}>Usage (7d)</div>
+                    <dl className="space-y-1 text-xs">
+                      {usageEntries.map(([metric, value]) => (
+                        <div key={metric} className="flex justify-between">
+                          <dt className={mutedClass}>{metric.replace(/_/g, ' ')}</dt>
+                          <dd className={headingClass}>
+                            {(value.quantity ?? 0).toLocaleString()} • {currencyFormatter.format(value.cost ?? 0)}
+                          </dd>
+                        </div>
+                      ))}
+                    </dl>
+                  </div>
+                )}
+              </div>
+            </div>
 
             {/* Gamified progress */}
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
@@ -3821,6 +4058,9 @@ const notifications = useMemo(() => {
           {burst.reason && <span className="text-[11px] font-medium text-emerald-200/80">• {burst.reason}</span>}
         </div>
       ))}
+      {showWelcomeCelebration && welcomeReward && (
+        <WelcomeCelebration reward={welcomeReward} onDismiss={dismissWelcomeCelebration} />
+      )}
     <div className={`min-h-screen flex items-stretch ${isDark ? 'bg-slate-950 text-white' : 'bg-slate-50 text-gray-900'}`}>
       {/* Vertical Navigation Sidebar */}
       <div

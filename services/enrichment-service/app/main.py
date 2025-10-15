@@ -6,25 +6,20 @@ from fastapi import FastAPI, HTTPException, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, EmailStr
 from typing import List, Optional, Dict, Any
-import logging
 import asyncio
 import uuid
 from datetime import datetime
 import httpx
 import json
 
-# Setup logging
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-)
-logger = logging.getLogger(__name__)
+import structlog
 
 # Import our modules
 import sys
 sys.path.append('../../..')
 from shared.database import db_client
 from shared.redis_client import redis_client
+from shared.observability import RequestContextMiddleware, setup_observability
 from app.enrichment.property_enricher import PropertyEnricher
 from app.enrichment.email_finder import EmailFinder
 from app.enrichment.address_validator import AddressValidator
@@ -35,6 +30,11 @@ app = FastAPI(
     description="Data validation and enrichment for roofing leads",
     version="1.0.0"
 )
+
+SERVICE_NAME = "enrichment-service"
+setup_observability(SERVICE_NAME)
+logger = structlog.get_logger(SERVICE_NAME)
+app.add_middleware(RequestContextMiddleware, service_name=SERVICE_NAME)
 
 # CORS middleware
 app.add_middleware(
@@ -86,9 +86,9 @@ async def startup():
     try:
         await db_client.connect()
         await redis_client.connect()
-        logger.info("✅ Enrichment Service started successfully")
+        logger.info("startup.success")
     except Exception as e:
-        logger.error(f"❌ Failed to start Enrichment Service: {e}")
+        logger.error("startup.failed", error=str(e))
         raise
 
 @app.on_event("shutdown")
@@ -97,14 +97,23 @@ async def shutdown():
     try:
         await db_client.disconnect()
         await redis_client.disconnect()
-        logger.info("✅ Enrichment Service shut down cleanly")
+        logger.info("shutdown.success")
     except Exception as e:
-        logger.error(f"❌ Error during shutdown: {e}")
+        logger.error("shutdown.failed", error=str(e))
 
-# Health check
-@app.get("/health")
-async def health_check():
-    """Health check endpoint"""
+# Health endpoints
+@app.get("/healthz")
+async def healthz():
+    return {
+        "status": "ok",
+        "service": SERVICE_NAME,
+        "timestamp": datetime.utcnow().isoformat(),
+    }
+
+
+@app.get("/readyz")
+async def readyz():
+    """Readiness probe to verify dependencies."""
     try:
         # Test database
         await db_client.execute("SELECT 1")
@@ -122,8 +131,13 @@ async def health_check():
             }
         }
     except Exception as e:
-        logger.error(f"Health check failed: {e}")
+        logger.error("readyz.failed", error=str(e))
         raise HTTPException(status_code=503, detail=f"Service unhealthy: {e}")
+
+
+@app.get("/health")
+async def legacy_health():
+    return await readyz()
 
 # Property enrichment
 @app.post("/enrich/property")

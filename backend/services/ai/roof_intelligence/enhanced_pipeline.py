@@ -202,8 +202,9 @@ class ImageryAutopilot:
         roof_visibility = float(np.mean(roof_edges > 0.12))
 
         issues: List[str] = []
-        if min(image.size) < 800:
-            issues.append("resolution_below_target")
+        min_dimension = min(image.size)
+        if min_dimension < 1024:
+            issues.append("low_resolution")
         if brightness < 0.22:
             issues.append("too_dark")
         if brightness > 0.82:
@@ -233,14 +234,18 @@ class ImageryAutopilot:
         metrics = {
             "brightness": round(brightness, 3),
             "contrast": round(contrast, 3),
-            "sharpness": round(sharpness, 4),
+            "laplacian_variance": round(sharpness, 4),
             "shadow_ratio": round(shadow_ratio, 3),
             "highlight_ratio": round(highlight_ratio, 3),
             "cloudiness": round(cloudiness, 3),
             "roof_visibility": round(roof_visibility, 3),
             "width": image.size[0],
             "height": image.size[1],
+            "resolution_ok": min_dimension >= 1024,
         }
+
+        # Maintain backwards-compatible key for legacy consumers
+        metrics["sharpness"] = metrics["laplacian_variance"]
 
         return ImageryQualityReport(overall_score=round(score, 1), metrics=metrics, issues=issues)
 
@@ -669,6 +674,14 @@ class EnhancedRoofAnalysisPipeline:
                 anomaly.mask_path = mask_path
                 anomaly.mask_url = mask_url
 
+        roof_analysis.confidence = self._combine_confidence(
+            base_confidence=roof_analysis.confidence,
+            imagery_quality=imagery_asset.quality,
+            anomaly_bundle=anomaly_bundle,
+            normalized_view=normalized_view,
+            damage_indicators=roof_analysis.damage_indicators,
+        )
+
         street_assets: List[StreetViewAsset] = []
         if enable_street_view:
             street_assets = await self._street_view.collect(latitude, longitude, dossier_id)
@@ -696,6 +709,44 @@ class EnhancedRoofAnalysisPipeline:
             self._imagery_autopilot.aclose(),
             self._street_view.aclose(),
         )
+
+    def _combine_confidence(
+        self,
+        base_confidence: float,
+        imagery_quality: ImageryQualityReport,
+        anomaly_bundle: AnomalyBundle,
+        normalized_view: NormalizedRoofView,
+        damage_indicators: Sequence[str],
+    ) -> float:
+        """Blend image quality and signal agreement into a unified confidence score."""
+
+        quality_factor = float(np.clip(imagery_quality.overall_score / 100.0, 0.0, 1.0))
+        coverage_factor = float(np.clip(normalized_view.coverage_ratio * 1.35, 0.0, 1.0))
+        anomaly_count = len(anomaly_bundle.anomalies)
+        if anomaly_count:
+            matches = sum(1 for anomaly in anomaly_bundle.anomalies if anomaly.type in damage_indicators)
+            agreement_ratio = matches / anomaly_count
+            signal_factor = 0.55 + agreement_ratio * 0.35
+        else:
+            signal_factor = 0.45 if damage_indicators else 0.7
+
+        penalty = 0.0
+        if "soft_focus" in imagery_quality.issues or imagery_quality.metrics.get("laplacian_variance", 0.0) < 0.0015:
+            penalty += 0.08
+        if "low_resolution" in imagery_quality.issues:
+            penalty += 0.05
+        if "too_dark" in imagery_quality.issues or "too_bright" in imagery_quality.issues:
+            penalty += 0.04
+
+        blended = (
+            np.clip(base_confidence, 0.0, 1.0) * 0.32
+            + quality_factor * 0.36
+            + signal_factor * 0.18
+            + coverage_factor * 0.14
+        )
+
+        adjusted = float(np.clip(blended - penalty, 0.35, 0.98))
+        return round(adjusted, 3)
 
     def _build_dossier(
         self,

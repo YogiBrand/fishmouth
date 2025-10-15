@@ -2,7 +2,7 @@ version: '3.8'
 
 services:
   postgres:
-    image: postgres:15-alpine
+    image: postgis/postgis:15-3.4-alpine
     container_name: fishmouth_postgres
     environment:
       POSTGRES_DB: fishmouth
@@ -37,6 +37,10 @@ services:
     environment:
       DATABASE_URL: postgresql://fishmouth:fishmouth123@postgres:5432/fishmouth
       REDIS_URL: redis://redis:6379
+      LOG_JSON: "true"
+      SERVICE_VERSION: ${SERVICE_VERSION:-dev}
+      OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT:-}
+      SENTRY_RELEASE: ${SENTRY_RELEASE:-local}
       JWT_SECRET: your-secret-key-change-in-production
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
@@ -55,6 +59,14 @@ services:
     volumes:
       - ./backend:/app
     command: uvicorn main:app --host 0.0.0.0 --port 8000 --reload
+    healthcheck:
+      test:
+        - "CMD-SHELL"
+        - "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8000/readyz')\""
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
 
   celery_worker:
     build:
@@ -91,6 +103,9 @@ services:
       DEEPGRAM_API_KEY: ${DEEPGRAM_API_KEY:-}
       TWILIO_ACCOUNT_SID: ${TWILIO_ACCOUNT_SID:-}
       TWILIO_AUTH_TOKEN: ${TWILIO_AUTH_TOKEN:-}
+      LOG_JSON: "true"
+      SERVICE_VERSION: ${SERVICE_VERSION:-dev}
+      OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT:-}
     ports:
       - "8001:8001"
     depends_on:
@@ -99,6 +114,14 @@ services:
     volumes:
       - ./backend:/app
     command: uvicorn voice_server:app --host 0.0.0.0 --port 8001 --reload
+    healthcheck:
+      test:
+        - "CMD-SHELL"
+        - "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8001/readyz')\""
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
 
   # Data Acquisition Services
   scraper-service:
@@ -111,6 +134,9 @@ services:
       REDIS_URL: redis://redis:6379
       GOOGLE_MAPS_API_KEY: ${GOOGLE_MAPS_API_KEY:-}
       MAPBOX_API_KEY: ${MAPBOX_API_KEY:-}
+      LOG_JSON: "true"
+      SERVICE_VERSION: ${SERVICE_VERSION:-dev}
+      OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT:-}
     ports:
       - "8011:8011"
     depends_on:
@@ -122,6 +148,14 @@ services:
       - ./services/scraper-service:/app
       - ./shared:/app/shared
     restart: unless-stopped
+    healthcheck:
+      test:
+        - "CMD-SHELL"
+        - "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8011/readyz')\""
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
 
   enrichment-service:
     build:
@@ -135,6 +169,9 @@ services:
       MAPBOX_API_KEY: ${MAPBOX_API_KEY:-}
       HUNTER_IO_API_KEY: ${HUNTER_IO_API_KEY:-}
       CLEARBIT_API_KEY: ${CLEARBIT_API_KEY:-}
+      LOG_JSON: "true"
+      SERVICE_VERSION: ${SERVICE_VERSION:-dev}
+      OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT:-}
     ports:
       - "8004:8004"
     depends_on:
@@ -146,6 +183,14 @@ services:
       - ./services/enrichment-service:/app
       - ./shared:/app/shared
     restart: unless-stopped
+    healthcheck:
+      test:
+        - "CMD-SHELL"
+        - "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8004/readyz')\""
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
 
   lead-generator:
     build:
@@ -166,6 +211,14 @@ services:
       - ./services/lead-generator:/app
       - ./shared:/app/shared
     restart: unless-stopped
+    healthcheck:
+      test:
+        - "CMD-SHELL"
+        - "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8008/readyz')\""
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
 
   orchestrator:
     build:
@@ -192,6 +245,14 @@ services:
       - ./services/orchestrator:/app
       - ./shared:/app/shared
     restart: unless-stopped
+    healthcheck:
+      test:
+        - "CMD-SHELL"
+        - "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8009/readyz')\""
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
 
   # Image Processing Service
   image-processor:
@@ -216,6 +277,14 @@ services:
       - ./shared:/app/shared
       - ./data/images:/app/images
     restart: unless-stopped
+    healthcheck:
+      test:
+        - "CMD-SHELL"
+        - "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8012/readyz')\""
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
 
   # ML Inference Service
   ml-inference:
@@ -241,6 +310,14 @@ services:
       - ./data/images:/app/images
       - ./models:/app/models
     restart: unless-stopped
+    healthcheck:
+      test:
+        - "CMD-SHELL"
+        - "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8013/readyz')\""
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
 
   frontend:
     build:
@@ -254,7 +331,7 @@ services:
       - /app/node_modules
     environment:
       - REACT_APP_API_URL=http://backend:8000
-      - REACT_APP_SCRAPER_URL=http://scraper-service:8002
+      - REACT_APP_SCRAPER_URL=http://scraper-service:8011
       - REACT_APP_ENRICHMENT_URL=http://enrichment-service:8004
       - REACT_APP_LEAD_GENERATOR_URL=http://lead-generator:8008
       - REACT_APP_ORCHESTRATOR_URL=http://orchestrator:8009
@@ -267,9 +344,16 @@ services:
       - orchestrator
     stdin_open: true
     tty: true
+    healthcheck:
+      test:
+        - "CMD-SHELL"
+        - "wget -qO- http://localhost:3000 >/dev/null 2>&1"
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
 
 volumes:
   postgres_data:
   scraper_data:
   enrichment_data:
-

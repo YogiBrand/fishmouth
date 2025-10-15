@@ -1,13 +1,15 @@
-import React, { useEffect, useRef } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 
-export default function GoogleAuthButton({ onSuccess, exposeController, hidden = false, width = 180, size = 'medium' }) {
+export default function GoogleAuthButton({ onSuccess, onError, exposeController, hidden = false, width = 180, size = 'medium' }) {
   const buttonRef = useRef(null);
   const internalButtonRef = useRef(null);
   const { loginWithGoogle } = useAuth();
+  const [isReady, setIsReady] = useState(false);
+  const clientId = process.env.REACT_APP_GOOGLE_CLIENT_ID;
+  const isAvailable = Boolean(clientId);
 
   useEffect(() => {
-    const clientId = process.env.REACT_APP_GOOGLE_CLIENT_ID;
     if (!clientId) return;
 
     const ensureScript = () => new Promise((resolve) => {
@@ -32,8 +34,12 @@ export default function GoogleAuthButton({ onSuccess, exposeController, hidden =
             const result = await loginWithGoogle(response.credential);
             if (result?.success) {
               if (typeof onSuccess === 'function') onSuccess(result);
+            } else if (typeof onError === 'function') {
+              onError(result?.error || 'Google login failed');
             }
-          } catch (_) {}
+          } catch (err) {
+            if (typeof onError === 'function') onError(err?.message || 'Google login failed');
+          }
         },
         auto_select: false,
         cancel_on_tap_outside: true,
@@ -51,22 +57,23 @@ export default function GoogleAuthButton({ onSuccess, exposeController, hidden =
             logo_alignment: 'left',
           });
           internalButtonRef.current = buttonRef.current.querySelector('div[role="button"], button');
+          setIsReady(true);
         } catch (_) {}
       }
-
-      if (typeof exposeController === 'function') {
-        exposeController({
-          open: () => {
-            try {
-              if (internalButtonRef.current) internalButtonRef.current.click();
-            } catch (_) {}
-          },
-        });
-      }
     });
-  }, [loginWithGoogle, exposeController, width, size]);
+  }, [loginWithGoogle, clientId, width, size]);
 
-  const clientId = process.env.REACT_APP_GOOGLE_CLIENT_ID;
+  const open = useCallback(() => {
+    try {
+      if (internalButtonRef.current) internalButtonRef.current.click();
+    } catch (_) {}
+  }, []);
+
+  useEffect(() => {
+    if (typeof exposeController === 'function') {
+      exposeController({ open, isReady, isAvailable });
+    }
+  }, [exposeController, open, isReady, isAvailable]);
 
   if (!clientId) {
     return (
@@ -87,5 +94,3 @@ export default function GoogleAuthButton({ onSuccess, exposeController, hidden =
     </div>
   );
 }
-
-

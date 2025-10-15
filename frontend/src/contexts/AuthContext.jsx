@@ -57,8 +57,11 @@ export const AuthProvider = ({ children }) => {
       const { access_token, user: userData } = data;
       localStorage.setItem('token', access_token);
       localStorage.setItem('user', JSON.stringify(userData));
+      if (userData?.gift_credits_awarded || userData?.gift_leads_awarded) {
+        localStorage.setItem('fm_onboarding_reward', JSON.stringify(userData));
+      }
       setUser(userData);
-      
+
       console.log('✅ Login successful! User:', userData);
       return { success: true, user: userData };
     } catch (error) {
@@ -98,9 +101,13 @@ export const AuthProvider = ({ children }) => {
       const { access_token, user: userData } = data;
       localStorage.setItem('token', access_token);
       localStorage.setItem('user', JSON.stringify(userData));
+      localStorage.removeItem('fm_onboarding_welcome_shown');
+      if (userData?.gift_credits_awarded || userData?.gift_leads_awarded) {
+        localStorage.setItem('fm_onboarding_reward', JSON.stringify(userData));
+      }
       setUser(userData);
       
-      return { success: true };
+      return { success: true, user: userData };
     } catch (error) {
       console.error('Signup error:', error);
       return { 
@@ -124,6 +131,9 @@ export const AuthProvider = ({ children }) => {
       const { access_token, user: userData } = data;
       localStorage.setItem('token', access_token);
       localStorage.setItem('user', JSON.stringify(userData));
+      if (userData?.gift_credits_awarded || userData?.gift_leads_awarded) {
+        localStorage.setItem('fm_onboarding_reward', JSON.stringify(userData));
+      }
       setUser(userData);
       return { success: true, user: userData };
     } catch (error) {
@@ -145,10 +155,37 @@ export const AuthProvider = ({ children }) => {
       const { access_token, user: userData } = data;
       localStorage.setItem('token', access_token);
       localStorage.setItem('user', JSON.stringify(userData));
+      if (userData?.gift_credits_awarded || userData?.gift_leads_awarded) {
+        localStorage.setItem('fm_onboarding_reward', JSON.stringify(userData));
+      }
       setUser(userData);
       return { success: true, user: userData };
     } catch (error) {
       return { success: false, error: error.message || 'Microsoft login failed' };
+    }
+  };
+
+  const loginWithApple = async (idToken) => {
+    try {
+      const response = await fetch(`${API_URL}/auth/apple`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id_token: idToken }),
+      });
+      const data = await response.json();
+      if (!response.ok) {
+        return { success: false, error: formatErrorMessage(data.detail, 'Apple login failed') };
+      }
+      const { access_token, user: userData } = data;
+      localStorage.setItem('token', access_token);
+      localStorage.setItem('user', JSON.stringify(userData));
+      if (userData?.gift_credits_awarded || userData?.gift_leads_awarded) {
+        localStorage.setItem('fm_onboarding_reward', JSON.stringify(userData));
+      }
+      setUser(userData);
+      return { success: true, user: userData };
+    } catch (error) {
+      return { success: false, error: error.message || 'Apple login failed' };
     }
   };
 
@@ -165,9 +202,9 @@ export const AuthProvider = ({ children }) => {
     signup,
     loginWithGoogle,
     loginWithMicrosoft,
+    loginWithApple,
     logout,
   };
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 };
-

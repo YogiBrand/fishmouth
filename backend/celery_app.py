@@ -13,8 +13,14 @@ def make_celery() -> Celery:
         backend=settings.celery.result_backend,
         include=[
             "tasks.scan_tasks",
+            "tasks.scan_job_tasks",
             "tasks.sequence_tasks",
             "tasks.analytics_tasks",
+            "tasks.message_tasks",
+            "tasks.growth_tasks",
+            "celery_tasks.tasks.scanning",
+            "celery_tasks.tasks.imagery_fetch",
+            "celery_tasks.tasks.cleanup_assets",
         ],
     )
 

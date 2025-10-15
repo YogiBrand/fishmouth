@@ -1,5 +1,6 @@
 from sqlalchemy import (
     Boolean,
+    CheckConstraint,
     Column,
     Date,
     DateTime,
@@ -90,7 +91,13 @@ class User(Base):
     stripe_customer_id = Column(String, nullable=True)
     stripe_subscription_item_id = Column(String, nullable=True)
     stripe_subscription_id = Column(String, nullable=True)
-    
+
+    lead_credits = Column(Integer, default=0)
+    gift_credits_awarded = Column(Integer, default=0)
+    gift_leads_awarded = Column(Integer, default=0)
+    gift_awarded_at = Column(DateTime, nullable=True)
+    onboarding_state = Column(JSON, nullable=True, default=dict)
+
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
     
@@ -101,6 +108,7 @@ class User(Base):
     voice_calls = relationship("VoiceCall", back_populates="user")
     voice_config = relationship("VoiceConfiguration", back_populates="user", uselist=False)
     ai_config = relationship("AIConfiguration", back_populates="user", uselist=False)
+    scan_jobs = relationship("ScanJob", back_populates="user")
 
 class AreaScan(Base):
     __tablename__ = "area_scans"
@@ -128,8 +136,37 @@ class AreaScan(Base):
     user = relationship("User", back_populates="scans")
     leads = relationship("Lead", back_populates="area_scan")
 
+
+class ScanJob(Base):
+    __tablename__ = "scan_jobs"
+
+    id = Column(PGUUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    area_type = Column(String(40), nullable=False)
+    area_payload = Column(JSON, nullable=False)
+    provider_policy = Column(JSON, nullable=False)
+    filters = Column(JSON, nullable=True)
+    enrichment_options = Column(JSON, nullable=True)
+    budget_cents = Column(Integer, nullable=False, default=0)
+    budget_spent_cents = Column(Integer, nullable=False, default=0)
+    status = Column(String(32), nullable=False, default="pending")
+    tiles_total = Column(Integer, nullable=False, default=0)
+    tiles_processed = Column(Integer, nullable=False, default=0)
+    tiles_cached = Column(Integer, nullable=False, default=0)
+    leads_generated = Column(Integer, nullable=False, default=0)
+    results = Column(JSONB, nullable=True)
+    error_message = Column(Text, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    started_at = Column(DateTime, nullable=True)
+    finished_at = Column(DateTime, nullable=True)
+
+    user = relationship("User", back_populates="scan_jobs")
+
 class Lead(Base):
     __tablename__ = "leads"
+    __table_args__ = (
+        Index("idx_leads_dedupe_key", "dedupe_key", unique=True),
+    )
 
     id = Column(Integer, primary_key=True, index=True)
     user_id = Column(Integer, ForeignKey("users.id"))
@@ -153,6 +190,9 @@ class Lead(Base):
     image_quality_score = Column(Float, nullable=True)
     image_quality_issues = Column(JSON, nullable=True)
     quality_validation_status = Column(String, default="pending")
+    analysis_confidence = Column(Float, nullable=True)
+    overlay_url = Column(String(500), nullable=True)
+    score_version = Column(String(20), nullable=True)
     roof_intelligence = Column(JSON, nullable=True)
     street_view_quality = Column(JSON, nullable=True)
 
@@ -180,6 +220,12 @@ class Lead(Base):
     homeowner_phone_hash = Column(String, nullable=True)
     homeowner_email_encrypted = Column(Text, nullable=True)
     homeowner_phone_encrypted = Column(Text, nullable=True)
+    dedupe_key = Column(String(64), nullable=True)
+    provenance = Column(JSON, nullable=False, default=dict)
+    dnc = Column(Boolean, nullable=False, default=False)
+    consent_email = Column(Boolean, nullable=False, default=False)
+    consent_sms = Column(Boolean, nullable=False, default=False)
+    consent_voice = Column(Boolean, nullable=False, default=False)
     
     # Property Data
     property_value = Column(Integer, nullable=True)
@@ -239,6 +285,11 @@ class Sequence(Base):
     user = relationship("User", back_populates="sequences")
     nodes = relationship("SequenceNode", back_populates="sequence", cascade="all, delete-orphan")
     enrollments = relationship("SequenceEnrollment", back_populates="sequence")
+    history_entries = relationship(
+        "SequenceHistory",
+        back_populates="sequence",
+        cascade="all, delete-orphan",
+    )
 
 class SequenceNode(Base):
     __tablename__ = "sequence_nodes"
@@ -302,6 +353,11 @@ class SequenceEnrollment(Base):
     lead = relationship("Lead", back_populates="sequence_enrollments")
     voice_calls = relationship("VoiceCall", back_populates="sequence_enrollment")
     executions = relationship("SequenceExecution", back_populates="enrollment", cascade="all, delete-orphan")
+    history = relationship(
+        "SequenceHistory",
+        back_populates="enrollment",
+        cascade="all, delete-orphan",
+    )
 
 
 class SequenceExecution(Base):
@@ -321,6 +377,31 @@ class SequenceExecution(Base):
 
     sequence = relationship("Sequence")
     enrollment = relationship("SequenceEnrollment", back_populates="executions")
+
+
+class SequenceHistory(Base):
+    __tablename__ = "sequence_history"
+    __table_args__ = (
+        Index("ix_sequence_history_enrollment", "enrollment_id"),
+        Index("ix_sequence_history_sequence", "sequence_id"),
+        Index("ix_sequence_history_created_at", "created_at"),
+    )
+
+    id = Column(Integer, primary_key=True, index=True)
+    sequence_id = Column(Integer, ForeignKey("sequences.id", ondelete="CASCADE"), nullable=False)
+    enrollment_id = Column(Integer, ForeignKey("sequence_enrollments.id", ondelete="CASCADE"), nullable=False)
+    node_id = Column(String, nullable=True)
+    step_type = Column(String, nullable=True)
+    action = Column(String, nullable=False)
+    status = Column(String, nullable=False)
+    result = Column(JSON, nullable=True)
+    error = Column(Text, nullable=True)
+    event_type = Column(String, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    occurred_at = Column(DateTime, default=datetime.utcnow)
+
+    sequence = relationship("Sequence", back_populates="history_entries")
+    enrollment = relationship("SequenceEnrollment", back_populates="history")
 
 class VoiceCall(Base):
     __tablename__ = "voice_calls"
@@ -726,11 +807,98 @@ class Report(Base):
     thumbnail_url = Column(String(500), nullable=True)
     share_url = Column(String(500), nullable=True)
     share_token = Column(String(128), nullable=True)
+    preview_url = Column(String(500), nullable=True)
+    render_checksum = Column(String(64), nullable=True)
+    render_html_path = Column(String(500), nullable=True)
+    rendered_at = Column(DateTime, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
     sent_at = Column(DateTime, nullable=True)
 
     lead = relationship("Lead")
+    public_shares = relationship("PublicShare", back_populates="report", cascade="all, delete-orphan")
+
+
+class EventLog(Base):
+    __tablename__ = "events"
+    __table_args__ = (
+        Index("ix_events_created_at", "created_at"),
+        Index("ix_events_type", "type"),
+    )
+
+    id = Column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    type = Column(String(100), nullable=False)
+    actor = Column(String(255), nullable=True)
+    lead_id = Column(String(64), nullable=True)
+    report_id = Column(String(64), ForeignKey("reports.id", ondelete="SET NULL"), nullable=True)
+    call_id = Column(String(64), nullable=True)
+    source_service = Column(String(100), nullable=False)
+    payload = Column(JSONB, nullable=False, default=dict)
+    request_id = Column(String(128), nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    report = relationship("Report")
+
+
+class PublicShare(Base):
+    __tablename__ = "public_shares"
+    __table_args__ = (
+        Index("ix_public_shares_report", "report_id"),
+        Index("ix_public_shares_token", "token", unique=True),
+    )
+
+    id = Column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    report_id = Column(String(64), ForeignKey("reports.id", ondelete="CASCADE"), nullable=False)
+    token = Column(String(32), nullable=False, unique=True)
+    expires_at = Column(DateTime, nullable=True)
+    revoked = Column(Boolean, default=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    report = relationship("Report", back_populates="public_shares")
+
+
+class EnrichmentCache(Base):
+    __tablename__ = "enrichment_cache"
+
+    cache_key = Column(String(128), primary_key=True)
+    cache_type = Column(String(32), nullable=False)
+    payload = Column(JSON, nullable=False, default=dict)
+    expires_at = Column(DateTime, nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class ETLJob(Base):
+    __tablename__ = "etl_jobs"
+
+    id = Column(PGUUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    job_type = Column(String(64), nullable=False)
+    target = Column(String(255), nullable=True)
+    status = Column(String(32), nullable=False, default="pending")
+    attempt = Column(Integer, nullable=False, default=1)
+    started_at = Column(DateTime, default=datetime.utcnow)
+    finished_at = Column(DateTime, nullable=True)
+    records_processed = Column(Integer, default=0)
+    success_count = Column(Integer, default=0)
+    skip_count = Column(Integer, default=0)
+    error_count = Column(Integer, default=0)
+    job_metadata = Column(JSON, nullable=True)
+
+    errors = relationship("ETLError", back_populates="job", cascade="all, delete-orphan")
+
+
+class ETLError(Base):
+    __tablename__ = "etl_errors"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    job_id = Column(PGUUID(as_uuid=True), ForeignKey("etl_jobs.id", ondelete="CASCADE"), nullable=False)
+    step = Column(String(100), nullable=False)
+    message = Column(Text, nullable=False)
+    retryable = Column(Boolean, nullable=False, default=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    job = relationship("ETLJob", back_populates="errors")
+
 
 class BuildingPermit(Base):
     __tablename__ = "building_permits"
@@ -848,6 +1016,9 @@ class PropertyScore(Base):
     visible_damage_level = Column(String(50), nullable=True)
     damage_indicators = Column(JSONB, nullable=True)
     estimated_remaining_life_years = Column(Integer, nullable=True)
+    image_quality = Column(Float, nullable=True)
+    confidence = Column(Float, nullable=True)
+    overlays_url = Column(String(500), nullable=True)
 
     total_urgency_score = Column(Integer, nullable=True)
     urgency_tier = Column(String(20), nullable=True)
@@ -1115,3 +1286,112 @@ class MailJob(Base):
 
     campaign = relationship("MailCampaign", back_populates="jobs")
     property = relationship("Property", back_populates="mail_jobs")
+
+
+class OutboxMessage(Base):
+    __tablename__ = "outbox_messages"
+
+    id = Column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    channel = Column(String(16), nullable=False)
+    to_address = Column(String(512), nullable=False)
+    subject = Column(String(512), nullable=True)
+    body_html = Column(Text, nullable=True)
+    body_text = Column(Text, nullable=True)
+    payload = Column(JSONB, nullable=False, default=dict)
+    status = Column(String(32), nullable=False, default="queued")
+    provider = Column(String(64), nullable=True)
+    provider_message_id = Column(String(128), nullable=True)
+    error = Column(Text, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    queued_at = Column(DateTime, default=datetime.utcnow)
+    sent_at = Column(DateTime, nullable=True)
+    delivered_at = Column(DateTime, nullable=True)
+
+    events = relationship("MessageEvent", back_populates="message", cascade="all, delete-orphan")
+
+
+class MessageEvent(Base):
+    __tablename__ = "message_events"
+
+    id = Column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    message_id = Column(String(36), ForeignKey("outbox_messages.id", ondelete="CASCADE"), nullable=False)
+    type = Column(String(32), nullable=False)
+    meta = Column(JSONB, nullable=False, default=dict)
+    occurred_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+
+    message = relationship("OutboxMessage", back_populates="events")
+
+
+class ContractorProspect(Base):
+    __tablename__ = "contractor_prospects"
+    __table_args__ = (
+        Index("ix_contractor_prospects_status", "status"),
+        Index("ix_contractor_prospects_city_state", "city", "state"),
+        Index("ix_contractor_prospects_score", "score"),
+        Index("ux_contractor_identity_hash", "identity_hash", unique=True),
+    )
+
+    id = Column(PGUUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    company_name = Column(String(200), nullable=False)
+    contact_name = Column(String(150), nullable=True)
+    email = Column(String(255), nullable=True)
+    phone = Column(String(50), nullable=True)
+    website = Column(String(255), nullable=True)
+    address = Column(String(255), nullable=True)
+    city = Column(String(120), nullable=True)
+    state = Column(String(40), nullable=True)
+    postal_code = Column(String(20), nullable=True)
+    source = Column(String(120), nullable=False)
+    identity_hash = Column(String(120), nullable=False)
+    score = Column(Float, nullable=True)
+    tags = Column(JSONB, nullable=False, default=dict)
+    enriched = Column(JSONB, nullable=False, default=dict)
+    status = Column(String(32), nullable=False, default="new")
+    sequence_stage = Column(Integer, nullable=False, default=0)
+    first_seen = Column(DateTime, nullable=False, default=datetime.utcnow)
+    last_seen = Column(DateTime, nullable=False, default=datetime.utcnow)
+    last_contacted_at = Column(DateTime, nullable=True)
+    next_contact_at = Column(DateTime, nullable=True)
+    reply_status = Column(String(32), nullable=True)
+    last_reply_at = Column(DateTime, nullable=True)
+    extra_metadata = Column(JSONB, nullable=False, default=dict)
+
+    events = relationship(
+        "ContractorProspectEvent",
+        back_populates="prospect",
+        cascade="all, delete-orphan",
+    )
+
+
+class ContractorProspectEvent(Base):
+    __tablename__ = "contractor_prospect_events"
+    __table_args__ = (
+        Index("ix_contractor_prospect_events_prospect", "prospect_id"),
+        Index("ix_contractor_prospect_events_type", "type"),
+    )
+
+    id = Column(PGUUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    prospect_id = Column(
+        PGUUID(as_uuid=True),
+        ForeignKey("contractor_prospects.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    type = Column(String(64), nullable=False)
+    payload = Column(JSONB, nullable=False, default=dict)
+    occurred_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+
+    prospect = relationship("ContractorProspect", back_populates="events")
+
+
+class Template(Base):
+    __tablename__ = "templates"
+    __table_args__ = (
+        CheckConstraint("scope IN ('report','email','sms')", name="templates_scope_check"),
+    )
+
+    id = Column(String(128), primary_key=True)
+    scope = Column(String(20), nullable=False)
+    content = Column(Text, nullable=False)
+    version = Column(Integer, nullable=False, default=1)
+    is_system = Column(Boolean, nullable=False, default=False)
+    updated_at = Column(DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow)

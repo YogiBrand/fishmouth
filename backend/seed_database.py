@@ -16,8 +16,21 @@ sys.path.append('/home/yogi/fishmouth/backend')
 
 from database import engine, get_db, Base
 from models import (
-    User, AreaScan, Lead, LeadPriority, LeadStatus, VoiceCall, VoiceCallTurn, 
-    VoiceBooking, VoiceConfiguration, VoiceMetricsDaily, LeadActivity
+    User,
+    AreaScan,
+    Lead,
+    LeadPriority,
+    LeadStatus,
+    VoiceCall,
+    VoiceCallTurn,
+    VoiceBooking,
+    VoiceConfiguration,
+    VoiceMetricsDaily,
+    LeadActivity,
+    Sequence,
+    SequenceEnrollment,
+    SequenceNode,
+    SequenceNodeType,
 )
 from auth import get_password_hash
 
@@ -343,9 +356,20 @@ def create_leads(db: Session, user: User, scans: list, num_leads=150):
                 "quality": {"score": image_quality_score, "issues": image_quality_issues},
                 "normalized_view_url": normalized_url,
                 "heatmap_url": heatmap_url,
+                "overlay_url": heatmap_url,
             },
             "street_view": street_views,
             "enhanced_roof_intelligence": dossier,
+            "confidence": round(random.uniform(0.58, 0.88), 2),
+            "score_version": "v1.5",
+            "score_breakdown": {
+                "condition": round(random.uniform(18, 32), 2),
+                "age": round(random.uniform(14, 22), 2),
+                "property_value": round(random.uniform(8, 15), 2),
+                "damage_indicators": round(random.uniform(6, 14), 2),
+                "imagery_quality": round(random.uniform(6, 12), 2),
+                "contact_confidence": round(random.uniform(4, 9), 2),
+            },
         }
         
         lead = Lead(
@@ -374,6 +398,9 @@ def create_leads(db: Session, user: User, scans: list, num_leads=150):
             image_quality_score=image_quality_score,
             image_quality_issues=image_quality_issues,
             quality_validation_status=quality_status,
+            analysis_confidence=ai_analysis["confidence"],
+            score_version="v1.5",
+            overlay_url=heatmap_url,
             roof_intelligence=dossier,
             street_view_quality=street_view_quality,
             status=status,
@@ -502,6 +529,128 @@ def create_voice_configuration(db: Session, user: User):
     db.commit()
     return config
 
+
+def create_demo_sequence(db: Session, user: User, leads: list) -> Sequence:
+    """Seed a demo nurture sequence with a sample enrollment."""
+
+    existing = (
+        db.query(Sequence)
+        .filter(Sequence.user_id == user.id, Sequence.name == "Demo Follow-Up Sequence")
+        .first()
+    )
+    if existing:
+        return existing
+
+    flow_data = {
+        "nodes": [
+            {
+                "id": "start",
+                "type": "start",
+                "position": {"x": 0, "y": 0},
+                "data": {"label": "Sequence Start"},
+            },
+            {
+                "id": "wait_short",
+                "type": "wait",
+                "position": {"x": 220, "y": 0},
+                "data": {
+                    "label": "Wait 60 seconds",
+                    "delay_seconds": 60,
+                },
+            },
+            {
+                "id": "email_intro",
+                "type": "email",
+                "position": {"x": 440, "y": 0},
+                "data": {
+                    "label": "Send roof insights email",
+                    "subject": "Your inspection preview",
+                    "body": (
+                        "Hi {{homeowner_name}},\n\n"
+                        "Thanks for checking your roof insights. We spotted a few items worth reviewing. "
+                        "Let us know a good time for a quick inspection."\n\n" "- FishMouth Roofing"
+                    ),
+                    "use_ai_writer": False,
+                },
+            },
+            {
+                "id": "wait_long",
+                "type": "wait",
+                "position": {"x": 660, "y": 0},
+                "data": {
+                    "label": "Wait 1 day",
+                    "delay_days": 1,
+                },
+            },
+            {
+                "id": "sms_follow",
+                "type": "sms",
+                "position": {"x": 880, "y": 0},
+                "data": {
+                    "label": "Send follow-up SMS",
+                    "message": "Quick reminder: we can confirm your roof inspection whenever you're ready.",
+                    "use_ai_writer": False,
+                },
+            },
+            {
+                "id": "end",
+                "type": "end",
+                "position": {"x": 1100, "y": 0},
+                "data": {"label": "Sequence Complete", "outcome": "completed"},
+            },
+        ],
+        "edges": [
+            {"id": "e1", "source": "start", "target": "wait_short"},
+            {"id": "e2", "source": "wait_short", "target": "email_intro"},
+            {"id": "e3", "source": "email_intro", "target": "wait_long"},
+            {"id": "e4", "source": "wait_long", "target": "sms_follow"},
+            {"id": "e5", "source": "sms_follow", "target": "end"},
+        ],
+    }
+
+    sequence = Sequence(
+        user_id=user.id,
+        name="Demo Follow-Up Sequence",
+        description="Wait 60s → email → wait 1 day → sms demo sequence",
+        is_active=True,
+        flow_data=flow_data,
+    )
+    db.add(sequence)
+    db.commit()
+    db.refresh(sequence)
+
+    for node in flow_data["nodes"]:
+        enum_type = SequenceNodeType(node["type"])
+        db.add(
+            SequenceNode(
+                sequence_id=sequence.id,
+                node_id=node["id"],
+                node_type=enum_type,
+                position_x=node.get("position", {}).get("x", 0),
+                position_y=node.get("position", {}).get("y", 0),
+                config=node.get("data", {}),
+            )
+        )
+
+    db.commit()
+
+    if leads:
+        lead = leads[0]
+        enrollment = SequenceEnrollment(
+            sequence_id=sequence.id,
+            lead_id=lead.id,
+            user_id=user.id,
+            status="active",
+            current_node_id="start",
+            next_execution_at=datetime.utcnow(),
+            enrolled_at=datetime.utcnow(),
+        )
+        db.add(enrollment)
+        sequence.total_enrolled += 1
+        db.commit()
+
+    return sequence
+
 def main():
     """Main seeding function"""
     print("🌱 Starting comprehensive database seeding...")
@@ -547,12 +696,16 @@ def main():
         print("📋 Creating lead activities...")
         activities = create_lead_activities(db, user, leads, 200)
         print(f"   ✅ Created {len(activities)} activities")
-        
+
+        print("🔁 Creating demo follow-up sequence...")
+        sequence = create_demo_sequence(db, user, leads)
+        print(f"   ✅ Sequence ready: {sequence.name}")
+
         # Create voice configuration
         print("⚙️  Creating voice configuration...")
         config = create_voice_configuration(db, user)
         print(f"   ✅ Created voice configuration")
-        
+
         print("\n🎉 Database seeding completed successfully!")
         print(f"📊 Summary:")
         print(f"   • User account: user@test.com / password123")
@@ -560,6 +713,7 @@ def main():
         print(f"   • Leads: {len(leads)}")
         print(f"   • Voice calls: {len(calls)}")
         print(f"   • Activities: {len(activities)}")
+        print(f"   • Demo sequences: 1")
         print(f"\n🚀 The application should now show comprehensive data!")
         
     except Exception as e:

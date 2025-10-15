@@ -10,6 +10,8 @@ from models import (
     Sequence,
     SequenceNode,
     SequenceEnrollment,
+    SequenceHistory,
+    OutboxMessage,
     Lead,
     SequenceNodeType,
     LeadActivity,
@@ -19,9 +21,39 @@ from models import (
 from zoneinfo import ZoneInfo
 from services.sequence_scheduler import schedule_enrollment_execution, trigger_pending_scan
 from services.sequence_delivery import get_delivery_adapters, DeliveryResult
+from services.outbox_service import queue_outbox_message
 from services.billing_service import record_usage
+from app.lib import coerce_model_dict, compose_context, resolve_text
 
 settings = get_settings()
+
+
+def _add_history_entry(
+    db: Session,
+    enrollment: SequenceEnrollment,
+    *,
+    action: str,
+    status: str,
+    node: Optional[SequenceNode] = None,
+    result: Optional[Dict[str, Any]] = None,
+    error: Optional[str] = None,
+    event_type: Optional[str] = None,
+) -> SequenceHistory:
+    entry = SequenceHistory(
+        sequence_id=enrollment.sequence_id,
+        enrollment_id=enrollment.id,
+        node_id=node.node_id if node else None,
+        step_type=node.node_type.value if node and node.node_type else None,
+        action=action,
+        status=status,
+        result=result or {},
+        error=error,
+        event_type=event_type,
+    )
+    db.add(entry)
+    db.flush()
+    return entry
+
 
 class SequenceService:
     """
@@ -408,9 +440,46 @@ class SequenceService:
         db.commit()
         db.refresh(enrollment)
 
+        _add_history_entry(
+            db,
+            enrollment,
+            action="enrollment.created",
+            status="active",
+            result={"sequence_id": sequence.id},
+        )
+
         SequenceService.trigger_processing()
         return enrollment
-    
+
+    @staticmethod
+    def find_enrollment(sequence_id: int, lead_id: int, db: Session) -> Optional[SequenceEnrollment]:
+        return (
+            db.query(SequenceEnrollment)
+            .filter(
+                SequenceEnrollment.sequence_id == sequence_id,
+                SequenceEnrollment.lead_id == lead_id,
+            )
+            .order_by(SequenceEnrollment.enrolled_at.desc())
+            .first()
+        )
+
+    @staticmethod
+    def pause_enrollment(enrollment: SequenceEnrollment, db: Session) -> SequenceEnrollment:
+        if enrollment.status == "paused":
+            return enrollment
+
+        enrollment.status = "paused"
+        enrollment.next_execution_at = None
+        _add_history_entry(
+            db,
+            enrollment,
+            action="enrollment.paused",
+            status="paused",
+        )
+        db.commit()
+        db.refresh(enrollment)
+        return enrollment
+
     @staticmethod
     def get_sequence_performance(sequence_id: int, user_id: int, db: Session) -> Dict:
         """Get sequence performance metrics"""
@@ -452,6 +521,19 @@ class SequenceExecutor:
     """
     Service for executing sequence steps and managing lead progression
     """
+
+    @staticmethod
+    def _check_contact_permissions(lead: Lead, channel: str) -> Optional[str]:
+        if lead.dnc:
+            return "Lead is marked as do-not-contact"
+        channel = channel.lower()
+        if channel == "email" and not lead.consent_email:
+            return "Email consent not granted"
+        if channel == "sms" and not lead.consent_sms:
+            return "SMS consent not granted"
+        if channel == "voice" and not lead.consent_voice:
+            return "Voice consent not granted"
+        return None
 
     @staticmethod
     def _safe_int(value, default=0) -> int:
@@ -508,6 +590,11 @@ class SequenceExecutor:
         config = node.config or {}
         delay_days = SequenceExecutor._safe_int(config.get("delay_days", 0), 0)
         delay_hours = SequenceExecutor._safe_int(config.get("delay_hours", 0), 0)
+        delay_minutes = SequenceExecutor._safe_int(config.get("delay_minutes", 0), 0)
+        delay_seconds = SequenceExecutor._safe_int(
+            config.get("delay_seconds", config.get("duration_sec", 0)),
+            0,
+        )
         send_time = config.get("send_time") or ""
 
         try:
@@ -516,7 +603,12 @@ class SequenceExecutor:
             tz = ZoneInfo("UTC")
 
         base_local = base_time.replace(tzinfo=timezone.utc).astimezone(tz)
-        target_local = base_local + timedelta(days=delay_days, hours=delay_hours)
+        target_local = base_local + timedelta(
+            days=delay_days,
+            hours=delay_hours,
+            minutes=delay_minutes,
+            seconds=delay_seconds,
+        )
 
         if send_time:
             try:
@@ -559,24 +651,41 @@ class SequenceExecutor:
         if not template:
             return ""
 
-        homeowner = lead.homeowner_name or "there"
-        address = lead.address or "your property"
-        city = lead.city or "your area"
-        state = lead.state or ""
-        agent_name = getattr(getattr(lead, "user", None), "company_name", None) or "Fish Mouth AI"
-        replacements = {
-            "homeowner_name": homeowner,
-            "address": address,
-            "city": city,
-            "state": state,
-            "agent_name": agent_name,
-            "lead_score": f"{lead.lead_score:.0f}" if lead.lead_score is not None else "",
-        }
+        context = SequenceExecutor._token_context_for_lead(lead)
+        resolution = resolve_text(template, context)
+        return resolution.text
 
-        result = template
-        for key, value in replacements.items():
-            result = result.replace(f"{{{{{key}}}}}", value)
-        return result
+    @staticmethod
+    def _token_context_for_lead(lead: Lead) -> Dict[str, Any]:
+        lead_payload = coerce_model_dict(lead)
+        company_payload = SequenceExecutor._company_for_lead(lead)
+        return compose_context(lead=lead_payload, company=company_payload or None)
+
+    @staticmethod
+    def _company_for_lead(lead: Lead) -> Dict[str, Any]:
+        company: Dict[str, Any] = {}
+        user = getattr(lead, "user", None)
+        if user:
+            user_payload = coerce_model_dict(
+                user,
+                columns=[
+                    "company_name",
+                    "full_name",
+                    "phone",
+                    "email",
+                    "business_logo_url",
+                ],
+            )
+            name = user_payload.get("company_name") or user_payload.get("full_name")
+            if name:
+                company["name"] = name
+            if user_payload.get("phone"):
+                company["phone"] = user_payload["phone"]
+            if user_payload.get("email"):
+                company.setdefault("email", user_payload["email"])
+            if user_payload.get("business_logo_url"):
+                company["logo_url"] = user_payload["business_logo_url"]
+        return company
 
     @staticmethod
     def _generate_ai_email(lead: Lead, config: Dict[str, Any]) -> str:
@@ -625,6 +734,14 @@ class SequenceExecutor:
                 # Mark as failed and continue
                 enrollment.status = "failed"
                 enrollment.error_message = str(e)
+                _add_history_entry(
+                    db,
+                    enrollment,
+                    action="execution.error",
+                    status="failed",
+                    result={},
+                    error=str(e),
+                )
                 db.commit()
     
     @staticmethod
@@ -705,6 +822,31 @@ class SequenceExecutor:
                     title="Voice call skipped – missing phone number",
                     description="Sequence attempted to place a call but no phone number was available.",
                     metadata={"sequence_node_id": node.node_id},
+                )
+            )
+            return
+
+        violation = SequenceExecutor._check_contact_permissions(lead, "voice")
+        if violation:
+            SequenceExecutor._complete_execution_log(log_entry, None, success=False, error=violation)
+            enrollment.status = "failed"
+            enrollment.error_message = violation
+            _add_history_entry(
+                db,
+                enrollment,
+                node=node,
+                action="step.voice",
+                status="blocked",
+                error=violation,
+            )
+            db.add(
+                LeadActivity(
+                    lead_id=lead.id,
+                    user_id=lead.user_id,
+                    activity_type="contact_blocked",
+                    title="Voice call blocked by consent guard",
+                    description=violation,
+                    metadata={"sequence_node_id": node.node_id, "channel": "voice"},
                 )
             )
             return
@@ -799,8 +941,32 @@ class SequenceExecutor:
         """Execute email step"""
         config = node.config or {}
         lead = enrollment.lead
-        adapters = get_delivery_adapters()
         log_entry = SequenceExecutor._start_execution_log(enrollment, node, "email", db)
+
+        violation = SequenceExecutor._check_contact_permissions(lead, "email")
+        if violation:
+            SequenceExecutor._complete_execution_log(log_entry, None, success=False, error=violation)
+            enrollment.status = "failed"
+            enrollment.error_message = violation
+            _add_history_entry(
+                db,
+                enrollment,
+                node=node,
+                action="step.email",
+                status="blocked",
+                error=violation,
+            )
+            db.add(
+                LeadActivity(
+                    lead_id=lead.id,
+                    user_id=lead.user_id,
+                    activity_type="contact_blocked",
+                    title="Email blocked by consent guard",
+                    description=violation,
+                    metadata={"sequence_node_id": node.node_id, "channel": "email"},
+                )
+            )
+            return
 
         use_ai = config.get("use_ai_writer", True)
         subject_template = config.get("subject", "Follow-up from Fish Mouth")
@@ -816,6 +982,14 @@ class SequenceExecutor:
             SequenceExecutor._complete_execution_log(log_entry, None, success=False, error=error)
             enrollment.status = "failed"
             enrollment.error_message = error
+            _add_history_entry(
+                db,
+                enrollment,
+                node=node,
+                action="step.email",
+                status="failed",
+                error=error,
+            )
             db.add(
                 LeadActivity(
                     lead_id=lead.id,
@@ -829,18 +1003,56 @@ class SequenceExecutor:
             return
 
         try:
-            result = await adapters.email.send_email(
+            queued = queue_outbox_message(
+                channel="email",
                 to_address=to_address,
                 subject=subject,
-                body=body,
-                metadata={"sequence_node_id": node.node_id},
+                text=body,
+                metadata={
+                    "sequence_node_id": node.node_id,
+                    "sequence_id": enrollment.sequence_id,
+                    "enrollment_id": enrollment.id,
+                    "lead_id": lead.id,
+                },
+                context={
+                    "sequence_id": enrollment.sequence_id,
+                    "enrollment_id": enrollment.id,
+                    "lead_id": lead.id,
+                    "node_id": node.node_id,
+                },
             )
-            SequenceExecutor._complete_execution_log(log_entry, result, success=result.success)
+            result = DeliveryResult(
+                success=True,
+                provider="outbox",
+                message_id=queued.get("id"),
+                metadata={"status": queued.get("status", "queued"), **queued},
+            )
+            SequenceExecutor._complete_execution_log(log_entry, result, success=True)
+            _add_history_entry(
+                db,
+                enrollment,
+                node=node,
+                action="step.email",
+                status="queued",
+                result={
+                    "message_id": queued.get("id"),
+                    "subject": subject,
+                    "status": queued.get("status", "queued"),
+                },
+            )
         except Exception as exc:  # pragma: no cover
             error = f"Email delivery failed: {exc}"
             SequenceExecutor._complete_execution_log(log_entry, None, success=False, error=error)
             enrollment.status = "failed"
             enrollment.error_message = error
+            _add_history_entry(
+                db,
+                enrollment,
+                node=node,
+                action="step.email",
+                status="failed",
+                error=error,
+            )
             db.add(
                 LeadActivity(
                     lead_id=lead.id,
@@ -853,33 +1065,13 @@ class SequenceExecutor:
             )
             return
 
-        if not result.success:
-            error = (result.metadata or {}).get("error") if result.metadata else "Email delivery reported a failure."
-            enrollment.status = "failed"
-            enrollment.error_message = error
-            db.add(
-                LeadActivity(
-                    lead_id=lead.id,
-                    user_id=lead.user_id,
-                    activity_type="email_failed",
-                    title=config.get("label", "Sequence Email Failed"),
-                    description=error,
-                    metadata={
-                        "sequence_node_id": node.node_id,
-                        "provider": result.provider,
-                        "delivery_metadata": result.metadata,
-                    },
-                )
-            )
-            return
-
         db.add(
             LeadActivity(
                 lead_id=lead.id,
                 user_id=lead.user_id,
                 activity_type="email_sent",
-                title=config.get("label", "Sequence Email"),
-                description=config.get("subject") or "Automated follow-up email delivered.",
+                title=config.get("label", "Sequence Email Queued"),
+                description="Sequence email queued for delivery via outbox.",
                 metadata={
                     "subject": subject,
                     "template": config.get("template"),
@@ -894,6 +1086,7 @@ class SequenceExecutor:
                 },
             )
         )
+
         record_usage(
             db,
             user_id=lead.user_id,
@@ -913,8 +1106,32 @@ class SequenceExecutor:
         config = node.config or {}
         lead = enrollment.lead
 
-        adapters = get_delivery_adapters()
         log_entry = SequenceExecutor._start_execution_log(enrollment, node, "sms", db)
+
+        violation = SequenceExecutor._check_contact_permissions(lead, "sms")
+        if violation:
+            SequenceExecutor._complete_execution_log(log_entry, None, success=False, error=violation)
+            enrollment.status = "failed"
+            enrollment.error_message = violation
+            _add_history_entry(
+                db,
+                enrollment,
+                node=node,
+                action="step.sms",
+                status="blocked",
+                error=violation,
+            )
+            db.add(
+                LeadActivity(
+                    lead_id=lead.id,
+                    user_id=lead.user_id,
+                    activity_type="contact_blocked",
+                    title="SMS blocked by consent guard",
+                    description=violation,
+                    metadata={"sequence_node_id": node.node_id, "channel": "sms"},
+                )
+            )
+            return
 
         use_ai = config.get("use_ai_writer", True)
         if use_ai:
@@ -928,6 +1145,14 @@ class SequenceExecutor:
             SequenceExecutor._complete_execution_log(log_entry, None, success=False, error=error)
             enrollment.status = "failed"
             enrollment.error_message = error
+            _add_history_entry(
+                db,
+                enrollment,
+                node=node,
+                action="step.sms",
+                status="failed",
+                error=error,
+            )
             db.add(
                 LeadActivity(
                     lead_id=lead.id,
@@ -941,17 +1166,55 @@ class SequenceExecutor:
             return
 
         try:
-            result = await adapters.sms.send_sms(
-                to_number=to_number,
-                body=message,
-                metadata={"sequence_node_id": node.node_id},
+            queued = queue_outbox_message(
+                channel="sms",
+                to_address=to_number,
+                text=message,
+                metadata={
+                    "sequence_node_id": node.node_id,
+                    "sequence_id": enrollment.sequence_id,
+                    "enrollment_id": enrollment.id,
+                    "lead_id": lead.id,
+                },
+                context={
+                    "sequence_id": enrollment.sequence_id,
+                    "enrollment_id": enrollment.id,
+                    "lead_id": lead.id,
+                    "node_id": node.node_id,
+                },
             )
-            SequenceExecutor._complete_execution_log(log_entry, result, success=result.success)
+            result = DeliveryResult(
+                success=True,
+                provider="outbox",
+                message_id=queued.get("id"),
+                metadata={"status": queued.get("status", "queued"), **queued},
+            )
+            SequenceExecutor._complete_execution_log(log_entry, result, success=True)
+            _add_history_entry(
+                db,
+                enrollment,
+                node=node,
+                action="step.sms",
+                status="queued",
+                result={
+                    "message_id": queued.get("id"),
+                    "to": to_number,
+                    "status": queued.get("status", "queued"),
+                },
+            )
         except Exception as exc:  # pragma: no cover
             error = f"SMS delivery failed: {exc}"
             SequenceExecutor._complete_execution_log(log_entry, None, success=False, error=error)
             enrollment.status = "failed"
             enrollment.error_message = error
+            _add_history_entry(
+                db,
+                enrollment,
+                node=node,
+                action="step.sms",
+                status="failed",
+                error=error,
+            )
             db.add(
                 LeadActivity(
                     lead_id=lead.id,
@@ -964,33 +1227,13 @@ class SequenceExecutor:
             )
             return
 
-        if not result.success:
-            error = (result.metadata or {}).get("error") if result.metadata else "SMS delivery reported a failure."
-            enrollment.status = "failed"
-            enrollment.error_message = error
-            db.add(
-                LeadActivity(
-                    lead_id=lead.id,
-                    user_id=lead.user_id,
-                    activity_type="sms_failed",
-                    title=config.get("label", "Sequence SMS Failed"),
-                    description=error,
-                    metadata={
-                        "sequence_node_id": node.node_id,
-                        "provider": result.provider,
-                        "delivery_metadata": result.metadata,
-                    },
-                )
-            )
-            return
-
         db.add(
             LeadActivity(
                 lead_id=lead.id,
                 user_id=lead.user_id,
                 activity_type="sms_sent",
-                title=config.get("label", "Sequence SMS"),
-                description="Automated SMS delivered to homeowner.",
+                title=config.get("label", "Sequence SMS Queued"),
+                description="Sequence SMS queued for delivery via outbox.",
                 metadata={
                     "message": message,
                     "to_number": to_number,
@@ -1012,7 +1255,6 @@ class SequenceExecutor:
             metadata={"sequence_node_id": node.node_id},
         )
 
-        # Move to next node
         next_node_id = SequenceExecutor._get_next_node_id(node, enrollment.sequence)
         enrollment.sms_sent += 1
         enrollment.steps_completed += 1
@@ -1024,37 +1266,76 @@ class SequenceExecutor:
         next_node_id = SequenceExecutor._get_next_node_id(node, enrollment.sequence)
         enrollment.steps_completed += 1
         SequenceExecutor._advance_to_next_node(enrollment, node, next_node_id, db)
+        _add_history_entry(
+            db,
+            enrollment,
+            node=node,
+            action="step.wait",
+            status="scheduled",
+            result={
+                "next_node_id": next_node_id,
+                "resume_at": enrollment.next_execution_at.isoformat() if enrollment.next_execution_at else None,
+            },
+        )
 
     @staticmethod
     async def _execute_condition(enrollment: SequenceEnrollment, node: SequenceNode, db: Session):
         """Execute condition step"""
         config = node.config or {}
-        condition = config.get("condition", "false")
-        
-        # Mock condition evaluation
-        condition_result = False  # For demo, always false
-        
-        # Get next node based on condition
+        expr = config.get("expr")
+        event_type = config.get("event_type") or config.get("event")
+
+        condition_result = False
+
+        if isinstance(expr, bool):
+            condition_result = expr
+        elif isinstance(expr, str):
+            lowered = expr.strip().lower()
+            condition_result = lowered in {"1", "true", "yes", "then"}
+
+        if event_type:
+            recent_event = (
+                db.query(SequenceHistory)
+                .filter(
+                    SequenceHistory.enrollment_id == enrollment.id,
+                    SequenceHistory.event_type == event_type,
+                )
+                .order_by(SequenceHistory.created_at.desc())
+                .first()
+            )
+            if recent_event:
+                condition_result = True
+
+        branch_value = "true" if condition_result else "false"
+
         flow_data = enrollment.sequence.flow_data
         edges = flow_data.get("edges", [])
-        
+
         next_node_id = None
         for edge in edges:
-            if edge["source"] == node.node_id:
-                edge_condition = edge.get("data", {}).get("condition")
-                if (condition_result and edge_condition == "true") or (not condition_result and edge_condition == "false"):
-                    next_node_id = edge["target"]
-                    break
-        
-        if not next_node_id:
-            # Default to first edge if no condition match
-            for edge in edges:
-                if edge["source"] == node.node_id:
-                    next_node_id = edge["target"]
-                    break
-        
+            if edge["source"] != node.node_id:
+                continue
+            edge_condition = edge.get("data", {}).get("condition")
+            if edge_condition is None and next_node_id is None:
+                next_node_id = edge["target"]
+            elif edge_condition == branch_value:
+                next_node_id = edge["target"]
+                break
+
         enrollment.steps_completed += 1
         SequenceExecutor._advance_to_next_node(enrollment, node, next_node_id, db)
+        _add_history_entry(
+            db,
+            enrollment,
+            node=node,
+            action="step.condition",
+            status="completed",
+            result={
+                "branch": branch_value,
+                "next_node_id": next_node_id,
+                "event_type": event_type,
+            },
+        )
     
     @staticmethod
     async def _execute_end(enrollment: SequenceEnrollment, node: SequenceNode, db: Session):
@@ -1088,6 +1369,14 @@ class SequenceExecutor:
                 "node_id": node.node_id,
             },
         ))
+        _add_history_entry(
+            db,
+            enrollment,
+            node=node,
+            action="step.end",
+            status="completed",
+            result={"outcome": outcome},
+        )
     
     @staticmethod
     def _get_next_node_id(current_node: SequenceNode, sequence: Sequence) -> Optional[str]:
@@ -1100,3 +1389,201 @@ class SequenceExecutor:
                 return edge["target"]
         
         return None
+
+
+class SequenceEventProcessor:
+    """Map platform events into sequence enrollments and history."""
+
+    SUPPORTED_EVENTS = {"report.sent", "report.viewed", "message.clicked"}
+
+    @staticmethod
+    def _coerce_int(value: Optional[Any]) -> Optional[int]:
+        if value is None:
+            return None
+        if isinstance(value, int):
+            return value
+        if isinstance(value, str):
+            try:
+                return int(value)
+            except ValueError:
+                return None
+        return None
+
+    @staticmethod
+    def handle_event(
+        event_type: str,
+        lead_id: Optional[Any],
+        payload: Dict[str, Any],
+        db: Session,
+    ) -> Dict[str, Any]:
+        if event_type not in SequenceEventProcessor.SUPPORTED_EVENTS:
+            return {"handled": False, "actions": []}
+
+        normalized_lead_id = SequenceEventProcessor._coerce_int(lead_id or payload.get("lead_id"))
+        actions: List[Dict[str, Any]] = []
+
+        if event_type == "report.sent":
+            actions.extend(
+                SequenceEventProcessor._auto_enroll_on_report_sent(
+                    db,
+                    normalized_lead_id,
+                    payload,
+                )
+            )
+        else:
+            actions.extend(
+                SequenceEventProcessor._record_lead_event(
+                    db,
+                    event_type,
+                    normalized_lead_id,
+                    payload,
+                )
+            )
+
+        db.commit()
+        if actions:
+            SequenceService.trigger_processing()
+
+        return {"handled": True, "actions": actions}
+
+    @staticmethod
+    def _auto_enroll_on_report_sent(
+        db: Session,
+        lead_id: Optional[int],
+        payload: Dict[str, Any],
+    ) -> List[Dict[str, Any]]:
+        outcomes: List[Dict[str, Any]] = []
+        if not lead_id:
+            return outcomes
+
+        lead = db.query(Lead).filter(Lead.id == lead_id).first()
+        if not lead:
+            return outcomes
+
+        sequence = (
+            db.query(Sequence)
+            .filter(Sequence.user_id == lead.user_id, Sequence.is_active == True)
+            .order_by(Sequence.created_at.asc())
+            .first()
+        )
+        if not sequence:
+            return outcomes
+
+        try:
+            enrollment = SequenceService.enroll_lead_in_sequence(lead.id, sequence.id, lead.user_id, db)
+        except ValueError:
+            enrollment = (
+                db.query(SequenceEnrollment)
+                .filter(
+                    SequenceEnrollment.lead_id == lead.id,
+                    SequenceEnrollment.sequence_id == sequence.id,
+                )
+                .first()
+            )
+            if not enrollment:
+                return outcomes
+            outcomes.append(
+                {
+                    "type": "existing_enrollment",
+                    "sequence_id": sequence.id,
+                    "enrollment_id": enrollment.id,
+                }
+            )
+            _add_history_entry(
+                db,
+                enrollment,
+                action="event.auto_enroll",
+                status=enrollment.status,
+                result=payload,
+                event_type="report.sent",
+            )
+            return outcomes
+
+        outcomes.append(
+            {
+                "type": "enrolled",
+                "sequence_id": sequence.id,
+                "enrollment_id": enrollment.id,
+            }
+        )
+        _add_history_entry(
+            db,
+            enrollment,
+            action="event.auto_enroll",
+            status=enrollment.status,
+            result=payload,
+            event_type="report.sent",
+        )
+        return outcomes
+
+    @staticmethod
+    def _record_lead_event(
+        db: Session,
+        event_type: str,
+        lead_id: Optional[int],
+        payload: Dict[str, Any],
+    ) -> List[Dict[str, Any]]:
+        outcomes: List[Dict[str, Any]] = []
+
+        enrollment_ids: List[int] = []
+
+        payload_enrollment = SequenceEventProcessor._coerce_int(
+            payload.get("enrollment_id") or payload.get("context", {}).get("enrollment_id")
+        )
+        if payload_enrollment:
+            enrollment_ids.append(payload_enrollment)
+        else:
+            message_id = payload.get("message_id")
+            if message_id:
+                message = db.query(OutboxMessage).filter(OutboxMessage.id == message_id).first()
+                if message:
+                    context = message.payload.get("context") or {}
+                    context_enrollment = SequenceEventProcessor._coerce_int(
+                        context.get("enrollment_id") or message.payload.get("metadata", {}).get("enrollment_id")
+                    )
+                    if context_enrollment:
+                        enrollment_ids.append(context_enrollment)
+                    if not lead_id:
+                        lead_id = SequenceEventProcessor._coerce_int(
+                            context.get("lead_id") or message.payload.get("metadata", {}).get("lead_id")
+                        )
+
+        enrollments: List[SequenceEnrollment] = []
+        if enrollment_ids:
+            enrollments = (
+                db.query(SequenceEnrollment)
+                .filter(SequenceEnrollment.id.in_(enrollment_ids))
+                .all()
+            )
+        elif lead_id:
+            enrollments = (
+                db.query(SequenceEnrollment)
+                .filter(
+                    SequenceEnrollment.lead_id == lead_id,
+                    SequenceEnrollment.status == "active",
+                )
+                .all()
+            )
+
+        for enrollment in enrollments:
+            if enrollment.status != "active":
+                continue
+            _add_history_entry(
+                db,
+                enrollment,
+                action="event.received",
+                status="recorded",
+                result=payload,
+                event_type=event_type,
+            )
+            enrollment.error_message = None
+            enrollment.next_execution_at = datetime.utcnow()
+            outcomes.append(
+                {
+                    "type": "event_recorded",
+                    "enrollment_id": enrollment.id,
+                    "event": event_type,
+                }
+            )
+
+        return outcomes

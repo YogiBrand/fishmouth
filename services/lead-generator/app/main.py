@@ -6,22 +6,17 @@ from fastapi import FastAPI, HTTPException, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import List, Optional, Dict, Any
-import logging
 from datetime import datetime
 import json
 
-# Setup logging
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-)
-logger = logging.getLogger(__name__)
+import structlog
 
 # Import our modules
 import sys
 sys.path.append('../../..')
 from shared.database import db_client
 from shared.redis_client import redis_client
+from shared.observability import RequestContextMiddleware, setup_observability
 from app.scoring.lead_scorer import LeadScorer
 from app.clustering.geo_clusterer import GeoClusterer
 from app.triggers.trigger_detector import TriggerDetector
@@ -32,6 +27,11 @@ app = FastAPI(
     description="Lead scoring, clustering, and packaging for roofing contractors",
     version="1.0.0"
 )
+
+SERVICE_NAME = "lead-generator"
+setup_observability(SERVICE_NAME)
+logger = structlog.get_logger(SERVICE_NAME)
+app.add_middleware(RequestContextMiddleware, service_name=SERVICE_NAME)
 
 # CORS middleware
 app.add_middleware(
@@ -82,7 +82,7 @@ async def startup():
         await redis_client.connect()
         logger.info("✅ Lead Generator Service started successfully")
     except Exception as e:
-        logger.error(f"❌ Failed to start Lead Generator Service: {e}")
+        logger.error("startup.failed", error=str(e))
         raise
 
 @app.on_event("shutdown")
@@ -93,12 +93,21 @@ async def shutdown():
         await redis_client.disconnect()
         logger.info("✅ Lead Generator Service shut down cleanly")
     except Exception as e:
-        logger.error(f"❌ Error during shutdown: {e}")
+        logger.error("shutdown.failed", error=str(e))
 
-# Health check
-@app.get("/health")
-async def health_check():
-    """Health check endpoint"""
+# Health endpoints
+@app.get("/healthz")
+async def healthz():
+    return {
+        "status": "ok",
+        "service": SERVICE_NAME,
+        "timestamp": datetime.utcnow().isoformat(),
+    }
+
+
+@app.get("/readyz")
+async def readyz():
+    """Readiness probe that exercises core dependencies."""
     try:
         # Test database
         await db_client.execute("SELECT 1")
@@ -118,8 +127,13 @@ async def health_check():
             }
         }
     except Exception as e:
-        logger.error(f"Health check failed: {e}")
+        logger.error("readyz.failed", error=str(e))
         raise HTTPException(status_code=503, detail=f"Service unhealthy: {e}")
+
+
+@app.get("/health")
+async def legacy_health():
+    return await readyz()
 
 # Score single lead
 @app.post("/score", response_model=LeadScore)

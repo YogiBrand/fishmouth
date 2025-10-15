@@ -1,0 +1,5 @@
+-- Optional: partition events by month for perf at scale
+-- This assumes an 'events' table already exists.
+-- Example snippet:
+-- SELECT create_hypertable('events', 'created_at');  -- if using TimescaleDB
+-- Otherwise, manual partitions can be created monthly.

@@ -53,12 +53,6 @@ const EnhancedReportGenerator = ({ lead: initialLead, businessProfile, onClose, 
     }
   }, [initialLead?.id]);
 
-  useEffect(() => {
-    if (visible) {
-      loadWizardLeads();
-    }
-  }, [visible, loadWizardLeads]);
-
   const computeLeadScore = useCallback((candidate) => {
     if (!candidate) return 0;
 
@@ -126,6 +120,12 @@ const EnhancedReportGenerator = ({ lead: initialLead, businessProfile, onClose, 
       setLeadLoading(false);
     }
   }, [computeLeadScore, lead, selectedLead]);
+
+  useEffect(() => {
+    if (visible) {
+      loadWizardLeads();
+    }
+  }, [visible, loadWizardLeads]);
 
   // Report Configuration
   const [reportConfig, setReportConfig] = useState({

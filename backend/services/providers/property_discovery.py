@@ -8,6 +8,7 @@ from urllib.parse import quote_plus
 
 import httpx
 from config import get_settings
+from services.etl.politeness import PoliteFetcher, SitePolitenessPolicy
 from services.resilience import AsyncRateLimiter, CircuitBreaker
 
 
@@ -47,6 +48,18 @@ class PropertyDiscoveryService:
             recovery_timeout=resilience.provider_recovery_seconds,
         )
         self._retry_attempts = resilience.provider_retry_attempts
+        self._fetcher = PoliteFetcher(
+            self._client,
+            policies=[
+                SitePolitenessPolicy(domain="api.mapbox.com", delay_seconds=0.35, respect_robots=False),
+                SitePolitenessPolicy(
+                    domain="nominatim.openstreetmap.org",
+                    delay_seconds=1.0,
+                    respect_robots=True,
+                    headers={"Accept-Language": "en-US,en;q=0.9"},
+                ),
+            ],
+        )
 
     async def discover(self, area_name: str, limit: int | None = None) -> List[PropertyCandidate]:
         limit = limit or settings.property_discovery_limit
@@ -79,7 +92,7 @@ class PropertyDiscoveryService:
         for attempt in range(1, self._retry_attempts + 1):
             try:
                 async with self._rate_limiter:
-                    response = await self._client.get(url, params=params)
+                    response = await self._fetcher.get(url, params=params)
                 response.raise_for_status()
                 data = response.json()
                 self._mapbox_breaker.record_success()
@@ -127,7 +140,7 @@ class PropertyDiscoveryService:
         for attempt in range(1, self._retry_attempts + 1):
             try:
                 async with self._rate_limiter:
-                    response = await self._client.get(
+                    response = await self._fetcher.get(
                         "https://nominatim.openstreetmap.org/search",
                         params=params,
                     )

@@ -1,17 +1,21 @@
 /**
- * Signup Page - Beautifully designed and perfectly responsive
+ * Signup Page - original Fish Mouth design with expanded provider sign-up
  */
-import React, { useState } from 'react';
+import React, { useCallback, useMemo, useState } from 'react';
 import { useSEO } from '../utils/seo';
 import { useNavigate, Link } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import { Mail, Lock, User, Building, Phone, AlertCircle, ArrowRight, CheckCircle } from 'lucide-react';
 import GoogleAuthButton from '../components/GoogleAuthButton';
 import MicrosoftAuthButton from '../components/MicrosoftAuthButton';
+import AppleAuthButton from '../components/AppleAuthButton';
+import GoogleLogo from '../assets/brand/google.svg';
+import AppleLogo from '../assets/brand/apple.svg';
+import MicrosoftLogo from '../assets/brand/microsoft.svg';
 
 const Signup = () => {
   // Prefill from chatbot data if available
-  const prefillData = React.useMemo(() => {
+  const prefillData = useMemo(() => {
     try {
       const stored = localStorage.getItem('chatbot_signup_data');
       if (stored) {
@@ -29,11 +33,26 @@ const Signup = () => {
     password: '',
     full_name: prefillData.full_name || '',
     company_name: prefillData.company_name || '',
-    phone: prefillData.phone || ''
+    phone: prefillData.phone || '',
   });
   const [loading, setLoading] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState('');
+  const [googleCtrl, setGoogleCtrl] = useState({
+    open: null,
+    isReady: false,
+    isAvailable: Boolean(process.env.REACT_APP_GOOGLE_CLIENT_ID),
+  });
+  const [appleCtrl, setAppleCtrl] = useState({
+    open: null,
+    isReady: false,
+    isAvailable: Boolean(process.env.REACT_APP_APPLE_CLIENT_ID),
+  });
+  const [microsoftCtrl, setMicrosoftCtrl] = useState({
+    open: null,
+    isReady: Boolean(process.env.REACT_APP_MS_CLIENT_ID),
+    isAvailable: Boolean(process.env.REACT_APP_MS_CLIENT_ID),
+  });
 
   const { signup } = useAuth();
   const navigate = useNavigate();
@@ -44,15 +63,136 @@ const Signup = () => {
     url: 'https://fishmouth.io/signup',
     ogTitle: 'Start Free — Fish Mouth AI',
     ogDescription: 'Get 25 free leads + 14-day access. AI that fills your calendar.',
-    ogImage: 'https://fishmouth.io/og-signup.jpg'
+    ogImage: 'https://fishmouth.io/og-signup.jpg',
   });
 
   const handleChange = (e) => {
     setFormData({
       ...formData,
-      [e.target.name]: e.target.value
+      [e.target.name]: e.target.value,
     });
   };
+
+  const handleProviderSuccess = () => {
+    setError('');
+    navigate('/dashboard');
+  };
+
+  const handleProviderError = (message) => {
+    if (message) {
+      setError(message);
+    }
+  };
+
+  const handleGoogleExpose = useCallback((controller = {}) => {
+    setGoogleCtrl((prev) => ({
+      open: controller.open || prev.open,
+      isReady: typeof controller.isReady === 'boolean' ? controller.isReady : prev.isReady,
+      isAvailable: typeof controller.isAvailable === 'boolean' ? controller.isAvailable : prev.isAvailable,
+    }));
+  }, []);
+
+  const handleAppleExpose = useCallback((controller = {}) => {
+    setAppleCtrl((prev) => ({
+      open: controller.open || prev.open,
+      isReady: typeof controller.isReady === 'boolean' ? controller.isReady : prev.isReady,
+      isAvailable: typeof controller.isAvailable === 'boolean' ? controller.isAvailable : prev.isAvailable,
+    }));
+  }, []);
+
+  const handleMicrosoftExpose = useCallback((controller = {}) => {
+    setMicrosoftCtrl((prev) => ({
+      open: controller.open || prev.open,
+      isReady: typeof controller.isReady === 'boolean' ? controller.isReady : prev.isReady,
+      isAvailable: typeof controller.isAvailable === 'boolean' ? controller.isAvailable : prev.isAvailable,
+    }));
+  }, []);
+
+  const handleGoogleClick = () => {
+    setError('');
+    if (!googleCtrl.isAvailable) {
+      setError('Google signup is not configured.');
+      return;
+    }
+    if (!googleCtrl.isReady) {
+      setError('Google sign-up is loading. Please try again in a moment.');
+      return;
+    }
+    try {
+      googleCtrl.open?.();
+    } catch (err) {
+      setError(err?.message || 'Unable to start Google signup.');
+    }
+  };
+
+  const handleAppleClick = () => {
+    setError('');
+    if (!appleCtrl.isAvailable) {
+      setError('Apple signup is not configured.');
+      return;
+    }
+    if (!appleCtrl.isReady) {
+      setError('Apple sign-up is loading. Please try again shortly.');
+      return;
+    }
+    try {
+      appleCtrl.open?.();
+    } catch (err) {
+      setError(err?.message || 'Unable to start Apple signup.');
+    }
+  };
+
+  const handleMicrosoftClick = () => {
+    setError('');
+    if (!microsoftCtrl.isAvailable) {
+      setError('Microsoft signup is not configured.');
+      return;
+    }
+    if (!microsoftCtrl.isReady) {
+      setError('Microsoft sign-up is still preparing. Please try again.');
+      return;
+    }
+    try {
+      microsoftCtrl.open?.();
+    } catch (err) {
+      setError(err?.message || 'Unable to start Microsoft signup.');
+    }
+  };
+
+  const providerStyles = useMemo(
+    () => ({
+      google: 'bg-white text-gray-700 border border-gray-300 hover:bg-gray-50',
+      apple: 'bg-white text-gray-700 border border-gray-300 hover:bg-gray-50',
+      microsoft: 'bg-white text-gray-700 border border-gray-300 hover:bg-gray-50',
+    }),
+    []
+  );
+
+  const ProviderButton = ({ variant, label, icon, onClick, disabled, title }) => (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={disabled}
+      className={`w-full flex items-center justify-center gap-3 font-semibold py-3.5 rounded-xl transition ${providerStyles[variant]} ${disabled ? 'opacity-50 cursor-not-allowed' : ''}`}
+      aria-label={label}
+      title={title || label}
+    >
+      {icon}
+      <span>{label}</span>
+    </button>
+  );
+
+  const GoogleIcon = (
+    <img src={GoogleLogo} alt="Google" className="h-5 w-5" loading="eager" />
+  );
+
+  const AppleIcon = (
+    <img src={AppleLogo} alt="Apple" className="h-5 w-5" loading="eager" />
+  );
+
+  const MicrosoftIcon = (
+    <img src={MicrosoftLogo} alt="Microsoft" className="h-5 w-5" loading="eager" />
+  );
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -67,7 +207,7 @@ const Signup = () => {
     setLoading(true);
 
     try {
-      const result = await signup(formData.email, formData.password, formData.companyName, formData.phone);
+      const result = await signup(formData.email, formData.password, formData.company_name, formData.phone);
       if (result.success) {
         // Redirect to user dashboard after successful signup
         navigate('/dashboard');
@@ -93,12 +233,8 @@ const Signup = () => {
                 🐟 Fish Mouth
               </h1>
             </Link>
-            <h2 className="text-2xl sm:text-3xl font-bold text-gray-900 mb-2">
-              Start Your Free Trial
-            </h2>
-            <p className="text-gray-600 text-base sm:text-lg">
-              Get 25 free leads + 14 days full access
-            </p>
+            <h2 className="text-2xl sm:text-3xl font-bold text-gray-900 mb-2">Start Your Free Trial</h2>
+            <p className="text-gray-600 text-base sm:text-lg">Get 25 free leads + 14 days full access</p>
           </div>
 
           {/* Error Message */}
@@ -230,7 +366,7 @@ const Signup = () => {
                 />
                 <button
                   type="button"
-                  onClick={() => setShowPassword((v) => !v)}
+                  onClick={() => setShowPassword((value) => !value)}
                   aria-pressed={showPassword}
                   aria-label={showPassword ? 'Hide password' : 'Show password'}
                   className="absolute inset-y-0 right-0 pr-4 flex items-center text-gray-500 hover:text-gray-700"
@@ -238,9 +374,7 @@ const Signup = () => {
                   {showPassword ? 'Hide' : 'Show'}
                 </button>
               </div>
-              <p className="mt-2 text-sm text-gray-500">
-                Must be at least 8 characters
-              </p>
+              <p className="mt-2 text-sm text-gray-500">Must be at least 8 characters</p>
             </div>
 
             {/* Submit Button */}
@@ -251,7 +385,7 @@ const Signup = () => {
             >
               {loading ? (
                 <>
-                  <div className="spinner border-white" style={{width: '20px', height: '20px', borderWidth: '2px'}}></div>
+                  <div className="spinner border-white" style={{ width: '20px', height: '20px', borderWidth: '2px' }}></div>
                   <span>Creating Account...</span>
                 </>
               ) : (
@@ -265,9 +399,14 @@ const Signup = () => {
             {/* Terms */}
             <p className="text-center text-sm text-gray-500 mt-4">
               By signing up, you agree to our{' '}
-              <Link to="/terms" className="text-blue-600 hover:text-blue-700 font-medium underline">Terms of Service</Link>{' '}
+              <Link to="/terms" className="text-blue-600 hover:text-blue-700 font-medium underline">
+                Terms of Service
+              </Link>{' '}
               and{' '}
-              <Link to="/privacy" className="text-blue-600 hover:text-blue-700 font-medium underline">Privacy Policy</Link>.
+              <Link to="/privacy" className="text-blue-600 hover:text-blue-700 font-medium underline">
+                Privacy Policy
+              </Link>
+              .
             </p>
           </form>
 
@@ -281,9 +420,54 @@ const Signup = () => {
                 <span className="px-3 bg-white text-gray-500">or</span>
               </div>
             </div>
-            <div className="grid gap-3">
-              <GoogleAuthButton onSuccess={() => navigate('/dashboard')} />
-              <MicrosoftAuthButton onSuccess={() => navigate('/dashboard')} />
+            <div className="space-y-3">
+              <ProviderButton
+                variant="google"
+                label="Sign up with Google"
+                icon={GoogleIcon}
+                onClick={handleGoogleClick}
+                disabled={!googleCtrl.isAvailable || !googleCtrl.isReady}
+                title={googleCtrl.isAvailable ? undefined : 'Google signup not configured'}
+              />
+              <ProviderButton
+                variant="apple"
+                label="Sign up with Apple"
+                icon={AppleIcon}
+                onClick={handleAppleClick}
+                disabled={!appleCtrl.isAvailable || !appleCtrl.isReady}
+                title={appleCtrl.isAvailable ? undefined : 'Apple signup not configured'}
+              />
+              <ProviderButton
+                variant="microsoft"
+                label="Sign up with Microsoft"
+                icon={MicrosoftIcon}
+                onClick={handleMicrosoftClick}
+                disabled={!microsoftCtrl.isAvailable || !microsoftCtrl.isReady}
+                title={microsoftCtrl.isAvailable ? undefined : 'Microsoft signup not configured'}
+              />
+            </div>
+            <div className="sr-only" aria-hidden="true">
+              <GoogleAuthButton
+                hidden
+                exposeController={handleGoogleExpose}
+                onSuccess={handleProviderSuccess}
+                onError={handleProviderError}
+                width={1}
+                size="medium"
+              />
+              <AppleAuthButton
+                hidden
+                compact={false}
+                exposeController={handleAppleExpose}
+                onSuccess={handleProviderSuccess}
+                onError={handleProviderError}
+              />
+              <MicrosoftAuthButton
+                hidden
+                exposeController={handleMicrosoftExpose}
+                onSuccess={handleProviderSuccess}
+                onError={handleProviderError}
+              />
             </div>
           </div>
 
@@ -293,9 +477,7 @@ const Signup = () => {
               <div className="w-full border-t border-gray-300"></div>
             </div>
             <div className="relative flex justify-center text-sm">
-              <span className="px-4 bg-white text-gray-500 font-medium">
-                Already have an account?
-              </span>
+              <span className="px-4 bg-white text-gray-500 font-medium">Already have an account?</span>
             </div>
           </div>
 
@@ -315,18 +497,19 @@ const Signup = () => {
       <div className="hidden lg:flex lg:w-1/2 bg-gradient-to-br from-blue-600 via-cyan-600 to-blue-700 p-12 items-center justify-center relative overflow-hidden">
         {/* Background Pattern */}
         <div className="absolute inset-0 opacity-10">
-          <div className="absolute inset-0" style={{
-            backgroundImage: 'radial-gradient(circle at 2px 2px, white 1px, transparent 0)',
-            backgroundSize: '40px 40px'
-          }}></div>
+          <div
+            className="absolute inset-0"
+            style={{
+              backgroundImage: 'radial-gradient(circle at 2px 2px, white 1px, transparent 0)',
+              backgroundSize: '40px 40px',
+            }}
+          ></div>
         </div>
 
         {/* Content */}
         <div className="relative z-10 max-w-md space-y-8">
           <div className="space-y-4">
-            <h2 className="text-4xl font-bold text-white leading-tight">
-              Stop Wasting Time. Start Closing Deals.
-            </h2>
+            <h2 className="text-4xl font-bold text-white leading-tight">Stop Wasting Time. Start Closing Deals.</h2>
             <p className="text-blue-100 text-lg">
               Join hundreds of roofing contractors who've automated their lead generation
             </p>
@@ -340,7 +523,9 @@ const Signup = () => {
               </div>
               <div>
                 <h3 className="text-white font-bold text-lg mb-1">No More Cold Calling</h3>
-                <p className="text-blue-100">AI calls leads 24/7, handles objections, books appointments directly to your calendar</p>
+                <p className="text-blue-100">
+                  AI calls leads 24/7, handles objections, books appointments directly to your calendar
+                </p>
               </div>
             </div>
 
@@ -369,17 +554,15 @@ const Signup = () => {
           <div className="pt-8 border-t border-white/20">
             <div className="flex items-center gap-3 text-white mb-2">
               <div className="flex">
-                {[1,2,3,4,5].map(i => (
+                {[1, 2, 3, 4, 5].map((i) => (
                   <svg key={i} className="w-5 h-5 text-yellow-400 fill-current" viewBox="0 0 20 20">
-                    <path d="M10 15l-5.878 3.09 1.123-6.545L.489 6.91l6.572-.955L10 0l2.939 5.955 6.572.955-4.756 4.635 1.123 6.545z"/>
+                    <path d="M10 15l-5.878 3.09 1.123-6.545L.489 6.91l6.572-.955L10 0l2.939 5.955 6.572.955-4.756 4.635 1.123 6.545z" />
                   </svg>
                 ))}
               </div>
               <span className="font-semibold">4.9/5</span>
             </div>
-            <p className="text-blue-100 text-sm">
-              500+ roofing companies trust Fish Mouth to generate their leads
-            </p>
+            <p className="text-blue-100 text-sm">500+ roofing companies trust Fish Mouth to generate their leads</p>
           </div>
         </div>
       </div>

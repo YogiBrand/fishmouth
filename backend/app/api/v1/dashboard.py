@@ -14,6 +14,11 @@ async def dashboard_stats():
     return await DashboardService.fetch_overview()
 
 
+@router.get("/summary")
+async def dashboard_summary(lead_limit: int = 25):
+    return await DashboardService.fetch_summary(lead_limit=lead_limit)
+
+
 @router.get("/active-clusters")
 async def dashboard_active_clusters(limit: int = 25):
     clusters = await DashboardService.fetch_active_clusters(limit=limit)

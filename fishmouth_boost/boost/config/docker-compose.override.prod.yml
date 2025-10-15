@@ -1,0 +1,17 @@
+services:
+  backend:
+    environment:
+      - LOG_JSON=true
+      - X_REQUEST_ID_HEADER=X-Request-ID
+      - RENDER_QUEUE=rendering
+      - MESSAGING_QUEUE=messaging
+      - OTEL_EXPORTER_OTLP_ENDPOINT=${OTEL_EXPORTER_OTLP_ENDPOINT:-}
+      - SENTRY_RELEASE=${SENTRY_RELEASE:-prod}
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/healthz"]
+      interval: 15s
+      timeout: 3s
+      retries: 5
+  frontend:
+    environment:
+      - REACT_APP_SCRAPER_URL=http://scraper-service:8011

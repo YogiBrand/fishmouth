@@ -1,28 +1,23 @@
 """
 Scraper Service - Intelligent web scraping with Crawl4AI and Ollama
-Port: 8002
+Port: 8011
 """
 from fastapi import FastAPI, HTTPException, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, HttpUrl
 from typing import List, Optional, Dict, Any
-import logging
 import asyncio
 import uuid
 from datetime import datetime
 
-# Setup logging
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-)
-logger = logging.getLogger(__name__)
+import structlog
 
 # Import our modules
 import sys
 sys.path.append('../../..')
 from shared.database import db_client
 from shared.redis_client import redis_client
+from shared.observability import RequestContextMiddleware, setup_observability
 from app.scrapers.smart_scraper import SmartScraper, scrape_urls_batch
 from app.utils.llm import llm
 
@@ -41,6 +36,11 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+SERVICE_NAME = "scraper-service"
+setup_observability(SERVICE_NAME)
+logger = structlog.get_logger(SERVICE_NAME)
+app.add_middleware(RequestContextMiddleware, service_name=SERVICE_NAME)
 
 # Pydantic models
 class ScrapeRequest(BaseModel):
@@ -89,10 +89,19 @@ async def shutdown():
     except Exception as e:
         logger.error(f"❌ Error during shutdown: {e}")
 
-# Health check
-@app.get("/health")
-async def health_check():
-    """Health check endpoint"""
+# Health and readiness probes
+@app.get("/healthz")
+async def healthz():
+    return {
+        "status": "ok",
+        "service": SERVICE_NAME,
+        "timestamp": datetime.utcnow().isoformat(),
+    }
+
+
+@app.get("/readyz")
+async def readyz():
+    """Readiness probe that validates downstream dependencies."""
     try:
         # Test database
         await db_client.execute("SELECT 1")
@@ -113,8 +122,14 @@ async def health_check():
             }
         }
     except Exception as e:
-        logger.error(f"Health check failed: {e}")
+        logger.error("readyz.failed", error=str(e))
         raise HTTPException(status_code=503, detail=f"Service unhealthy: {e}")
+
+
+# Backwards compatibility
+@app.get("/health")
+async def legacy_health():
+    return await readyz()
 
 # Single URL scraping
 @app.post("/scrape")

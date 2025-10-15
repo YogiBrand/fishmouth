@@ -9,6 +9,7 @@ import AdminDashboard from './pages/AdminDashboard';
 import Dashboard from './pages/Dashboard';
 import CaseStudies from './pages/CaseStudies';
 import ScanResults from './pages/ScanResults';
+import ScanPage from './pages/ScanPage';
 import EnhancedLeadDetailPage from './components/EnhancedLeadDetailPage';
 import ComprehensiveBusinessSettings from './components/ComprehensiveBusinessSettings';
 import SmartOnboardingAssistant from './components/SmartOnboardingAssistant';
@@ -95,6 +96,15 @@ function App() {
             element={
               <ProtectedRoute>
                 <Dashboard />
+              </ProtectedRoute>
+            }
+          />
+
+          <Route
+            path="/scan"
+            element={
+              <ProtectedRoute>
+                <ScanPage />
               </ProtectedRoute>
             }
           />

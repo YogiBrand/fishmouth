@@ -1,6 +1,14 @@
 import axios from 'axios';
 import { mockLeads, mockDashboardStats, mockRecentScans, mockActivities, mockSequences, mockAnalyticsData } from '../data/mockLeads';
 
+const ENABLE_MOCK_DATA = process.env.REACT_APP_ENABLE_MOCKS === 'true' || process.env.NODE_ENV !== 'production';
+
+const assertMocksEnabled = (error) => {
+  if (!ENABLE_MOCK_DATA) {
+    throw error;
+  }
+};
+
 const normalizeMockLead = (lead) => {
   if (!lead) return null;
 
@@ -52,6 +60,7 @@ const normalizeMockLead = (lead) => {
     `https://images.fishmouth.ai/demo/normalized-${(lead.id % 8) + 1}.jpg`;
 
   const heatmapUrl = baseRoofIntelligence.heatmap?.url || `https://images.fishmouth.ai/demo/heatmap-${(lead.id % 6) + 1}.png`;
+  const overlayUrl = lead.overlay_url || heatmapUrl;
 
   const imageQualityScore = lead.image_quality_score ?? lead.imagery?.quality_score ?? 78;
   const imageQualityIssues = lead.image_quality_issues || lead.imagery?.issues || [];
@@ -79,6 +88,8 @@ const normalizeMockLead = (lead) => {
 
   const homeownerName = lead.homeowner_name || `${lead.first_name || ''} ${lead.last_name || ''}`.trim();
   const estimatedValue = lead.estimated_value || (lead.property_value ? Math.round(lead.property_value * 0.08) : null);
+  const confidenceScore = lead.analysis_confidence ?? lead.ai_analysis?.confidence ?? null;
+  const scoreVersion = lead.score_version ?? lead.ai_analysis?.score_version ?? null;
 
   const aiAnalysis = {
     summary:
@@ -91,7 +102,8 @@ const normalizeMockLead = (lead) => {
     damage_indicators: lead.damage_indicators || [],
     imagery: {
       normalized_view_url: normalizedViewUrl,
-      heatmap_url: heatmapUrl,
+      heatmap_url: overlayUrl,
+      overlay_url: overlayUrl,
       quality_status: qualityStatus,
       quality: {
         score: imageQualityScore,
@@ -100,6 +112,8 @@ const normalizeMockLead = (lead) => {
     },
     street_view: baseRoofIntelligence.street_view || [],
     enhanced_roof_intelligence: baseRoofIntelligence,
+    confidence: confidenceScore,
+    score_version: scoreVersion,
   };
 
   return {
@@ -127,6 +141,9 @@ const normalizeMockLead = (lead) => {
     image_quality_score: imageQualityScore,
     image_quality_issues: imageQualityIssues,
     quality_validation_status: qualityStatus,
+    analysis_confidence: confidenceScore,
+    score_version: scoreVersion,
+    overlay_url: overlayUrl,
     street_view_quality: streetViewQuality,
     roof_intelligence: baseRoofIntelligence,
     area_scan_id: lead.area_scan_id || lead.scan_id || null,
@@ -205,6 +222,7 @@ export const leadAPI = {
       });
       return response.data;
     } catch (error) {
+      assertMocksEnabled(error);
       console.log('Using mock area scan for development');
       // Generate a mock scan ID and return scan details
       const scanId = `scan_${Date.now()}`;
@@ -250,6 +268,7 @@ export const leadAPI = {
       });
       return response.data;
     } catch (error) {
+      assertMocksEnabled(error);
       console.log('Using mock scan estimate for development');
       const baseProperties = Math.round(160 * Math.max(radiusMiles, 0.25) ** 2);
       const capped = Math.min(baseProperties, propertyCap || 400);
@@ -279,6 +298,7 @@ export const leadAPI = {
       const response = await api.get(`/api/scan/${scanId}/status`);
       return response.data;
     } catch (error) {
+      assertMocksEnabled(error);
       console.log('Using mock scan status for development');
       // Return realistic mock scan status based on scanId or create a new one
       const mockScan = mockRecentScans.find(scan => scan.id === scanId);
@@ -355,6 +375,7 @@ export const leadAPI = {
       const response = await api.get(`/api/scan/${scanId}/results`);
       return response.data;
     } catch (error) {
+      assertMocksEnabled(error);
       console.log('Using mock scan results for development');
       // Return comprehensive mock scan results that match ScanResults page expectations
       const scanLeads = mockLeads.filter(lead => lead.scan_id === scanId || scanId.includes('scan')).slice(0, 15);
@@ -418,6 +439,26 @@ export const leadAPI = {
     }
   },
 
+  createScanJob: async (payload) => {
+    const response = await api.post('/api/v1/scan-jobs', payload);
+    return response.data;
+  },
+
+  listScanJobs: async (limit = 20) => {
+    const response = await api.get('/api/v1/scan-jobs', { params: { limit } });
+    return response.data;
+  },
+
+  getScanJob: async (jobId) => {
+    const response = await api.get(`/api/v1/scan-jobs/${jobId}`);
+    return response.data;
+  },
+
+  getScanJobResults: async (jobId) => {
+    const response = await api.get(`/api/v1/scan-jobs/${jobId}/results`);
+    return response.data;
+  },
+
   // Lead Management
   getLeads: async (filters = {}) => {
     try {
@@ -431,6 +472,7 @@ export const leadAPI = {
       const response = await api.get(`/api/leads?${params.toString()}`);
       return response.data;
     } catch (error) {
+      assertMocksEnabled(error);
       console.log('Using mock lead data for development');
       // Apply filters to mock data
       let filteredLeads = [...mockLeads];
@@ -470,6 +512,7 @@ export const leadAPI = {
       const response = await api.get(`/api/leads/${leadId}`);
       return response.data;
     } catch (error) {
+      assertMocksEnabled(error);
       console.log('Using mock lead data for development');
       const lead = mockLeads.find((l) => Number(l.id) === Number(leadId));
       if (!lead) throw new Error('Lead not found');
@@ -484,6 +527,7 @@ export const leadAPI = {
       const response = await api.get(`/api/leads/${leadId}/sequences`);
       return response.data;
     } catch (error) {
+      assertMocksEnabled(error);
       console.log('Using mock lead sequence enrollments for development');
       return [];
     }
@@ -500,6 +544,7 @@ export const leadAPI = {
       const response = await api.get('/api/scans');
       return response.data;
     } catch (error) {
+      assertMocksEnabled(error);
       console.log('Using mock scan data for development');
       return mockRecentScans;
     }
@@ -511,6 +556,7 @@ export const leadAPI = {
       const response = await api.get('/api/dashboard/stats');
       return response.data;
     } catch (error) {
+      assertMocksEnabled(error);
       console.log('Using mock dashboard stats for development');
       return mockDashboardStats;
     }
@@ -522,6 +568,7 @@ export const leadAPI = {
       const response = await api.get('/api/sequences');
       return response.data;
     } catch (error) {
+      assertMocksEnabled(error);
       console.log('Using mock sequence data for development');
       return mockSequences;
     }
@@ -554,6 +601,7 @@ export const leadAPI = {
       });
       return response.data;
     } catch (error) {
+      assertMocksEnabled(error);
       console.log('Using mock sequence enrollment for development');
       // Mock successful enrollment
       return {
@@ -583,6 +631,7 @@ export const leadAPI = {
       });
       return response.data;
     } catch (error) {
+      assertMocksEnabled(error);
       console.log('Using mock CSV export for development');
       // Generate realistic CSV export data
       let leadsToExport = [...mockLeads];
@@ -888,6 +937,7 @@ export const voiceAPI = {
       });
       return response.data;
     } catch (error) {
+      assertMocksEnabled(error);
       console.log('Using mock voice call for development');
       // Generate mock call data
       const callId = `call_${Date.now()}_${leadId}`;
@@ -916,6 +966,7 @@ export const voiceAPI = {
       const response = await api.get(`/api/voice/calls/${callId}` , { fmAllowUnauthorized: true });
       return response.data;
     } catch (error) {
+      assertMocksEnabled(error);
       console.log('Using mock voice call detail for development');
       const fallback =
         fallbackVoiceCalls.find((call) => String(call.id) === String(callId)) || fallbackVoiceCalls[0];
@@ -959,6 +1010,7 @@ export const voiceAPI = {
       const response = await api.get(`/api/voice/calls?${params.toString()}`, { fmAllowUnauthorized: true });
       return response.data;
     } catch (error) {
+      assertMocksEnabled(error);
       console.log('Using mock voice calls data for development');
       const normalized = fallbackVoiceCalls.map((call, index) => {
         const createdAt = call.created_at
@@ -1054,6 +1106,7 @@ export const voiceAPI = {
       const response = await api.get(`/api/voice/analytics/daily?days=${days}`);
       return response.data;
     } catch (error) {
+      assertMocksEnabled(error);
       console.log('Using mock voice analytics data for development');
       return buildMockVoiceAnalytics(days);
     }
@@ -1086,6 +1139,7 @@ export const analyticsAPI = {
       const response = await api.get('/api/analytics/performance');
       return response.data;
     } catch (error) {
+      assertMocksEnabled(error);
       console.log('Using mock analytics data for development');
       return mockAnalyticsData;
     }
@@ -1096,6 +1150,7 @@ export const analyticsAPI = {
       const response = await api.get('/api/analytics/comprehensive');
       return response.data;
     } catch (error) {
+      assertMocksEnabled(error);
       console.log('Using mock comprehensive analytics data for development');
       return mockAnalyticsData;
     }

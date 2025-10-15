@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import base64
+import secrets
 import uuid
 from datetime import datetime
 from pathlib import Path
@@ -35,7 +36,7 @@ async def list_reports(limit: int = 20):
         rows = await db.fetch_all(
             sa.text(
                 """
-                SELECT id, lead_id, type, status, created_at, updated_at, thumbnail_url, share_url, pdf_url
+                SELECT id, lead_id, type, status, created_at, updated_at, thumbnail_url, share_url, pdf_url, preview_url
                 FROM reports
                 ORDER BY created_at DESC
                 LIMIT :limit
@@ -54,6 +55,7 @@ async def list_reports(limit: int = 20):
                 "thumbnail_url": r.get("thumbnail_url"),
                 "share_url": r.get("share_url"),
                 "pdf_url": r.get("pdf_url"),
+                "preview_url": r.get("preview_url"),
             }
             for r in rows
         ]
@@ -129,11 +131,32 @@ def _persist_thumbnail(report_id: str, thumbnail_data: Optional[str]) -> Optiona
 
 
 async def _ensure_share_link(db, report_id: str, share_token: Optional[str], share_url: Optional[str]) -> Dict[str, str]:
-    if share_token and share_url:
-        return {"token": share_token, "url": share_url}
+    if share_token:
+        record = await db.fetch_one(
+            sa.text("SELECT token, revoked FROM public_shares WHERE token = :token"),
+            {"token": share_token},
+        )
+        if record and not record.get("revoked"):
+            return {"token": record["token"], "url": share_url or f"/r/{record['token']}"}
 
-    token = uuid.uuid4().hex
-    url = f"/reports/shared/{token}"
+    token = secrets.token_hex(16)
+    url = f"/r/{token}"
+    now = datetime.utcnow()
+
+    await db.execute(
+        sa.text(
+            """
+            INSERT INTO public_shares (id, report_id, token, revoked, created_at)
+            VALUES (:id, :report_id, :token, 0, :created_at)
+            """
+        ),
+        {
+            "id": str(uuid.uuid4()),
+            "report_id": report_id,
+            "token": token,
+            "created_at": now,
+        },
+    )
 
     await db.execute(
         sa.text(
@@ -147,7 +170,7 @@ async def _ensure_share_link(db, report_id: str, share_token: Optional[str], sha
             "token": token,
             "url": url,
             "report_id": report_id,
-            "updated_at": datetime.utcnow(),
+            "updated_at": now,
         },
     )
     await db.commit()
@@ -163,6 +186,18 @@ async def _ensure_optional_columns(db) -> None:
         )
         await db.execute(
             sa.text("ALTER TABLE reports ADD COLUMN IF NOT EXISTS share_token VARCHAR(128)")
+        )
+        await db.execute(
+            sa.text("ALTER TABLE reports ADD COLUMN IF NOT EXISTS preview_url VARCHAR(500)")
+        )
+        await db.execute(
+            sa.text("ALTER TABLE reports ADD COLUMN IF NOT EXISTS render_checksum VARCHAR(128)")
+        )
+        await db.execute(
+            sa.text("ALTER TABLE reports ADD COLUMN IF NOT EXISTS render_html_path VARCHAR(500)")
+        )
+        await db.execute(
+            sa.text("ALTER TABLE reports ADD COLUMN IF NOT EXISTS rendered_at TIMESTAMP")
         )
         await db.commit()
     except Exception as exc:  # noqa: BLE001
@@ -199,8 +234,6 @@ async def create_report(report_data: ReportCreate):
         )
 
         thumbnail_url = _persist_thumbnail(report_id, report_data.thumbnail_data)
-        share_token = uuid.uuid4().hex
-        share_url = f"/reports/shared/{share_token}"
 
         # Insert report into database
         await db.execute(
@@ -223,12 +256,15 @@ async def create_report(report_data: ReportCreate):
                 "content": resolved_content,
                 "business_profile": business_profile_payload,
                 "thumbnail_url": thumbnail_url,
-                "share_token": share_token,
-                "share_url": share_url,
+                "share_token": None,
+                "share_url": None,
                 "created_at": created_at,
                 "updated_at": created_at,
             }
         )
+
+        share = await _ensure_share_link(db, report_id, None, None)
+        share_url = share["url"]
 
         # Create activity entry
         await db.execute(
@@ -286,6 +322,10 @@ async def get_report(report_id: str):
         if not report:
             raise HTTPException(status_code=404, detail="Report not found")
         
+        rendered_at = report.get("rendered_at")
+        fallback_share_url = None
+        if report.get("share_token"):
+            fallback_share_url = f"/r/{report['share_token']}"
         return {
             "id": report["id"],
             "lead_id": report["lead_id"],
@@ -296,9 +336,13 @@ async def get_report(report_id: str):
             "status": report["status"],
             "created_at": report["created_at"],
             "updated_at": report["updated_at"],
-            "share_url": report.get("share_url") or f"/reports/view/{report_id}",
+            "share_url": report.get("share_url") or fallback_share_url,
             "thumbnail_url": report.get("thumbnail_url"),
             "pdf_url": report.get("pdf_url"),
+            "preview_url": report.get("preview_url"),
+            "rendered_at": rendered_at.isoformat() if rendered_at else None,
+            "render_checksum": report.get("render_checksum"),
+            "render_html_path": report.get("render_html_path"),
         }
         
     except HTTPException:
@@ -553,23 +597,52 @@ async def get_shared_report(share_token: str):
     db = await get_db()
     try:
         await _ensure_optional_columns(db)
-        report = await db.fetch_one(
+        share = await db.fetch_one(
             sa.text(
                 """
-                SELECT id, lead_id, type, config, content, business_profile, status,
-                       created_at, updated_at, thumbnail_url, pdf_url, share_url
-                FROM reports
-                WHERE share_token = :token
+                SELECT r.id, r.lead_id, r.type, r.config, r.content, r.business_profile, r.status,
+                       r.created_at, r.updated_at, r.thumbnail_url, r.pdf_url, r.share_url,
+                       r.preview_url, r.rendered_at, r.render_checksum, r.render_html_path,
+                       ps.revoked, ps.expires_at
+                FROM public_shares ps
+                JOIN reports r ON r.id = ps.report_id
+                WHERE ps.token = :token
+                ORDER BY ps.created_at DESC
+                LIMIT 1
                 """
             ),
             {"token": share_token},
         )
 
-        if not report:
+        legacy = False
+        if not share:
+            share = await db.fetch_one(
+                sa.text(
+                    """
+                    SELECT id, lead_id, type, config, content, business_profile, status,
+                           created_at, updated_at, thumbnail_url, pdf_url, share_url,
+                           preview_url, rendered_at, render_checksum, render_html_path,
+                           0 AS revoked, NULL AS expires_at
+                    FROM reports
+                    WHERE share_token = :token
+                    """
+                ),
+                {"token": share_token},
+            )
+            legacy = True
+
+        if not share:
             raise HTTPException(status_code=404, detail="Shared report not found")
 
+        if not legacy:
+            if share.get("revoked"):
+                raise HTTPException(status_code=410, detail="Share revoked")
+            expires_at = share.get("expires_at")
+            if expires_at and isinstance(expires_at, datetime) and expires_at < datetime.utcnow():
+                raise HTTPException(status_code=410, detail="Share expired")
+
         lead_summary = None
-        if report.get("lead_id"):
+        if share.get("lead_id"):
             lead_row = await db.fetch_one(
                 sa.text(
                     """
@@ -577,7 +650,7 @@ async def get_shared_report(share_token: str):
                     FROM leads WHERE id = :lead_id
                     """
                 ),
-                {"lead_id": report["lead_id"]},
+                {"lead_id": share["lead_id"]},
             )
             if lead_row:
                 lead_summary = {
@@ -590,18 +663,27 @@ async def get_shared_report(share_token: str):
                     "phone": lead_row.get("phone"),
                 }
 
+        rendered_at = share.get("rendered_at")
+        fallback_share_url = share.get("share_url")
+        if not fallback_share_url:
+            fallback_share_url = f"/r/{share_token}"
+
         return {
-            "id": report["id"],
-            "type": report["type"],
-            "config": report["config"],
-            "content": report["content"],
-            "business_profile": report["business_profile"],
-            "status": report["status"],
-            "created_at": report["created_at"],
-            "updated_at": report["updated_at"],
-            "thumbnail_url": report.get("thumbnail_url"),
-            "pdf_url": report.get("pdf_url"),
-            "share_url": report.get("share_url"),
+            "id": share["id"],
+            "type": share["type"],
+            "config": share["config"],
+            "content": share["content"],
+            "business_profile": share["business_profile"],
+            "status": share["status"],
+            "created_at": share["created_at"],
+            "updated_at": share["updated_at"],
+            "thumbnail_url": share.get("thumbnail_url"),
+            "pdf_url": share.get("pdf_url"),
+            "preview_url": share.get("preview_url"),
+            "rendered_at": rendered_at.isoformat() if rendered_at else None,
+            "render_checksum": share.get("render_checksum"),
+            "render_html_path": share.get("render_html_path"),
+            "share_url": fallback_share_url,
             "lead": lead_summary,
         }
     finally:

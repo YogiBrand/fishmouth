@@ -1,7 +1,7 @@
 /**
  * Home (Landing Page) - ABSOLUTELY PERFECT
  */
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { useSEO } from '../utils/seo';
 import { track } from '../utils/analytics';
 import { useNavigate, Link } from 'react-router-dom';
@@ -40,12 +40,12 @@ import {
 const Home = () => {
   const navigate = useNavigate();
   useSEO({
-    title: 'Fish Mouth AI — Book 15+ Roofing Inspections/Week With 25 Free Leads',
-    description: 'Stop cold calling. Our AI finds homeowners with 15+ year roofs, qualifies them, and books your calendar. Get 25 free leads + 60-day guarantee.',
+    title: 'Fish Mouth AI — 3 Free HOT Leads + 50% Off Month One',
+    description: 'Roof leads in your city that actually pick up. Claim 3 free HOT leads, take 50% off your first month, and let AI book your inspections.',
     canonical: 'https://fishmouth.io/',
     url: 'https://fishmouth.io/',
     ogTitle: 'Fish Mouth AI for Roofers',
-    ogDescription: 'AI that finds aged roofs and fills your calendar. Get 25 free leads.',
+    ogDescription: 'AI that surfaces aged roofs and drops 3 free HOT leads into your queue.',
     ogImage: 'https://fishmouth.io/og-home.jpg',
     jsonLd: {
       '@context': 'https://schema.org',
@@ -58,12 +58,19 @@ const Home = () => {
         '@type': 'Offer',
         price: '0',
         priceCurrency: 'USD',
-        description: '25 free leads + 14-day access'
+        description: '3 free HOT leads + 50% off your first month'
       }
     }
   });
   
   // State management
+  const [localizedCity, setLocalizedCity] = useState('your city');
+  const [localizedRegion, setLocalizedRegion] = useState('');
+  const localizedDisplay = useMemo(
+    () => (localizedRegion ? `${localizedCity}, ${localizedRegion}` : localizedCity),
+    [localizedCity, localizedRegion]
+  );
+
   const [activeFilter, setActiveFilter] = useState('all');
   const [selectedLead, setSelectedLead] = useState(null);
   const [showSequences, setShowSequences] = useState(false);
@@ -78,7 +85,7 @@ const Home = () => {
   const [videoCardIndex, setVideoCardIndex] = useState(0);
   const [mobileOverlayIndex, setMobileOverlayIndex] = useState(0);
   const [dashboardTab, setDashboardTab] = useState('dashboard'); // dashboard, leads, analytics, settings, ai-activity, calendar
-  
+
   // Settings tab state
   const [notificationSettings, setNotificationSettings] = useState({
     newLeads: true,
@@ -114,6 +121,26 @@ const Home = () => {
     personal: true,
     followUps: true
   });
+
+  useEffect(() => {
+    let cancelled = false;
+    fetch('/api/v1/geoip')
+      .then((res) => (res.ok ? res.json() : Promise.reject()))
+      .then((data) => {
+        if (cancelled) return;
+        setLocalizedCity(data?.city || 'your city');
+        setLocalizedRegion(data?.region || '');
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setLocalizedCity('your city');
+          setLocalizedRegion('');
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
   
   // Cycle floating notifications
   useEffect(() => {
@@ -506,7 +533,7 @@ const Home = () => {
                 onClick={() => navigate('/signup')}
                 className="bg-gradient-to-r from-blue-600 to-cyan-600 hover:from-blue-700 hover:to-cyan-700 text-white font-semibold px-4 sm:px-6 py-2 sm:py-3 rounded-xl transition-all duration-300 transform hover:scale-105 shadow-lg text-sm sm:text-base"
               >
-                Get 25 Free Leads Now
+                Unlock 3 Free HOT Leads
               </button>
             </div>
           </div>
@@ -514,11 +541,11 @@ const Home = () => {
         {/* Announcement Bar */}
         <div className="bg-yellow-50 border-t border-yellow-200">
           <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-2 text-center">
-            <span className="text-yellow-800 text-sm sm:text-base">Limited offer: 25 free leads + $299 setup included</span>
+            <span className="text-yellow-800 text-sm sm:text-base">Limited offer: 3 free HOT leads + 50% off your first month</span>
             <button
               onClick={() => navigate('/signup')}
               className="ml-3 inline-flex items-center px-3 py-1 rounded-full text-white bg-gradient-to-r from-blue-600 to-cyan-600 text-xs sm:text-sm font-semibold hover:from-blue-700 hover:to-cyan-700"
-              aria-label="Claim 25 free leads now"
+              aria-label="Claim 3 free HOT leads now"
             >
               Claim Now
             </button>
@@ -538,26 +565,26 @@ const Home = () => {
             
             {/* Benefit-Driven Headline */}
             <h1 className="text-4xl sm:text-5xl lg:text-6xl xl:text-[60px] font-extrabold text-gray-900 leading-tight tracking-tight">
-              Book 15+ Roofing Inspections Every Week — On Autopilot
+              Roof leads in {localizedDisplay} that actually pick up.
               <span className="block text-2xl sm:text-3xl lg:text-4xl xl:text-[36px] mt-3 sm:mt-4 text-gray-700 font-semibold">
-                AI finds aged roofs, qualifies homeowners, and fills your calendar
+                Claim 3 free HOT leads, get 50% off your first month, and let AI book the inspections.
               </span>
             </h1>
             
             {/* Value Proposition */}
             <p className="text-base sm:text-lg lg:text-xl text-gray-700 leading-relaxed max-w-3xl mx-auto font-medium">
-              Stop cold calling and buying bad lists. Close more jobs with qualified homeowners who need a new roof now.
+              Stop cold calling and buying bad lists. Close more jobs with qualified homeowners who are actively asking for roof help in {localizedDisplay}.
             </p>
 
             {/* CTA Buttons */}
             <div className="flex flex-col sm:flex-row gap-4 sm:gap-6 justify-center items-center pt-4">
               <button
                 onClick={() => { track('cta_click.home.hero', { location: 'hero' }); navigate('/signup'); }}
-                aria-label="Get 25 free roofing leads and start booking inspections"
+                aria-label="Get 3 free roofing leads and start booking inspections"
                 className="w-full sm:w-auto bg-gradient-to-r from-green-600 to-emerald-600 hover:from-green-700 hover:to-emerald-700 text-white font-bold px-8 sm:px-10 py-4 sm:py-5 rounded-2xl transition-all duration-300 transform hover:scale-105 shadow-2xl text-base sm:text-lg flex items-center justify-center gap-3"
               >
                 <Sparkles size={24} />
-                <span>Get 25 Free Leads Now</span>
+                <span>Unlock 3 Free HOT Leads</span>
                 <ArrowRight size={24} />
               </button>
             </div>
@@ -568,7 +595,7 @@ const Home = () => {
                 <div className="w-8 h-8 bg-green-100 rounded-full flex items-center justify-center">
                   <CheckCircle className="text-green-600" size={18} />
                 </div>
-                <span className="text-gray-800 font-bold">25 Free Leads</span>
+                <span className="text-gray-800 font-bold">3 Free HOT Leads</span>
               </div>
               <div className="flex items-center gap-2">
                 <div className="w-8 h-8 bg-blue-100 rounded-full flex items-center justify-center">
@@ -2386,10 +2413,10 @@ const Home = () => {
                   </p>
                   <button
                     onClick={() => navigate('/signup')}
-                  aria-label="Get 25 free roofing leads and start booking inspections"
+                    aria-label="Get 3 free roofing leads and start booking inspections"
                     className="bg-white text-blue-600 hover:bg-gray-100 font-bold px-6 sm:px-8 py-3 sm:py-4 rounded-xl transition-all shadow-lg text-base sm:text-lg inline-flex items-center gap-2"
                   >
-                    <span>Get 25 Free Leads Now</span>
+                    <span>Unlock 3 Free HOT Leads</span>
                     <ArrowRight size={20} />
                   </button>
                 </div>

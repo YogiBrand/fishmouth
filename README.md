@@ -56,6 +56,14 @@ Set the following in `.env` to enable live enrichment:
 | `STRIPE_SECRET_KEY` | Stripe API secret used for usage-based billing |
 | `STRIPE_PRICE_ID` | Stripe metered price ID associated with your subscription plan |
 | `STORAGE_BASE_URL` | (Optional) Public URL prefix for served aerial imagery |
+| `FEATURE_FLAGS__USE_MOCK_PROPERTY_DISCOVERY` | Set to `false` to require live Mapbox/OSM discovery |
+| `FEATURE_FLAGS__USE_MOCK_PROPERTY_ENRICHMENT` | Set to `false` to call your enrichment provider |
+| `FEATURE_FLAGS__USE_MOCK_CONTACT_ENRICHMENT` | Set to `false` to call your contact enrichment provider |
+| `FEATURE_FLAGS__USE_MOCK_IMAGERY` | Set to `false` to fetch live imagery instead of generated placeholders |
+| `FEATURE_FLAGS__USE_MOCK_SEQUENCE_DELIVERY` | Set to `false` to deliver email/SMS/voice through configured providers |
+| `REACT_APP_API_URL` | Frontend base URL for the backend (e.g. `https://api.fishmouth.io`) |
+| `REACT_APP_MAPBOX_TOKEN` | Mapbox token exposed to the frontend for map search |
+| `REACT_APP_ENABLE_MOCKS` | Set to `false` (recommended for prod) to disable UI fallbacks to mock data |
 
 If any of these are omitted the system gracefully falls back to deterministic synthetic data to keep demos running while you secure credentials.
 
@@ -161,6 +169,31 @@ Access:
 ### 4. Create Admin Account
 
 Visit http://localhost:3000/signup and create your first account.
+
+### 5. Switch From Mock Data to Live Providers
+
+The stack ships with safe defaults so the product demo works without paid credentials.  
+When you are ready for production, set the following overrides and restart the services:
+
+1. Disable the mock feature flags in the backend (either in `.env` or the deployment environment):
+   ```
+   FEATURE_FLAGS__USE_MOCK_PROPERTY_DISCOVERY=false
+   FEATURE_FLAGS__USE_MOCK_PROPERTY_ENRICHMENT=false
+   FEATURE_FLAGS__USE_MOCK_CONTACT_ENRICHMENT=false
+   FEATURE_FLAGS__USE_MOCK_IMAGERY=false
+   FEATURE_FLAGS__USE_MOCK_SEQUENCE_DELIVERY=false
+   ```
+   Populate the corresponding provider keys (Mapbox, Estated/alternative property API, contact enrichment, Telnyx, SendGrid/Postmark, Deepgram, ElevenLabs, OpenAI/Anthropic) so the services can run end-to-end.
+
+2. Configure the frontend to talk to the live API and surface real errors:
+   ```
+   REACT_APP_API_URL=https://your-api-domain
+   REACT_APP_MAPBOX_TOKEN=pk.***
+   REACT_APP_ENABLE_MOCKS=false
+   ```
+   Without `REACT_APP_ENABLE_MOCKS=false`, the dashboard will silently fall back to mock data on any request failure.
+
+3. Confirm that `/api/v1/...` endpoints are the canonical paths you expose publicly. The legacy `/api/...` routes remain for backward compatibility but will be removed once all consumers have migrated.
 
 ---
 

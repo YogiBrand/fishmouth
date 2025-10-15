@@ -3,7 +3,12 @@ import csv
 import hmac
 import io
 import json
+import sys
+import os
 import uuid
+
+# Add parent directory to path for shared imports
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import sentry_sdk
 import structlog
@@ -12,7 +17,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from prometheus_fastapi_instrumentator import Instrumentator
-from sqlalchemy import func
+from sqlalchemy import func, text
 from sqlalchemy.orm import Session
 from pydantic import BaseModel, EmailStr
 from typing import Optional, List, Dict
@@ -48,20 +53,40 @@ from app.api.v1.contagion import router as contagion_router
 from app.api.v1.dashboard import router as dashboard_router
 from app.api.v1.reports import router as reports_router
 from app.api.v1.enhanced_reports import router as enhanced_reports_router
+from app.api.v1.events import router as events_router
 from app.api.v1.webhooks import router as webhooks_router
 from app.api.v1.branding import router as branding_router
 from app.api.v1.mailers import router as mailers_router
+from app.api.v1.scan_jobs import router as scan_jobs_router
+from app.api.v1.scans import router as scans_router
+from app.api.v1.reports_render import router as reports_render_router
+from app.api.v1.shares import public_router as public_shares_router
+from app.api.v1.shares import router as shares_router
+from app.api.v1.app_config import router as app_config_router
+from app.api.v1.activity_feed import router as activity_router
+from app.api.v1.sequences import (
+    sequences_router as sequences_api_router,
+    enrollments_router as enrollments_api_router,
+)
+from app.api.v1.templates import router as templates_router
+from app.api.v1.outbox import router as outbox_router
+from app.api.v1.growth import router as growth_router
+from app.api.v1.geoip import router as geoip_router
+from app.api.v1.assets import router as assets_router
+from app.api.v1.maps import router as maps_router
 from services.sequence_delivery import get_delivery_adapters
 from app.services.activity_stream import activity_notifier
 from cryptography.exceptions import InvalidSignature
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
 from logging_config import bind_request_context, clear_request_context, configure_logging
+from shared.observability import init_tracing
 
 # Create tables
 Base.metadata.create_all(bind=engine)
 
 settings = get_settings()
 configure_logging()
+init_tracing("backend")
 
 if settings.instrumentation.sentry_dsn:
     sentry_sdk.init(
@@ -69,6 +94,7 @@ if settings.instrumentation.sentry_dsn:
         traces_sample_rate=settings.instrumentation.sentry_traces_sample_rate,
         profiles_sample_rate=settings.instrumentation.sentry_profiles_sample_rate,
         environment=settings.environment,
+        release=settings.instrumentation.sentry_release or os.getenv("SERVICE_VERSION"),
     )
 
 logger = structlog.get_logger("api")
@@ -106,11 +132,28 @@ app.include_router(ai_voice_router)
 app.include_router(webhooks_router)
 app.include_router(branding_router)
 app.include_router(mailers_router)
+app.include_router(scan_jobs_router)
+app.include_router(scans_router)
+app.include_router(maps_router)
+app.include_router(assets_router)
+app.include_router(events_router)
+app.include_router(reports_render_router)
+app.include_router(shares_router)
+app.include_router(public_shares_router)
+app.include_router(app_config_router)
+app.include_router(activity_router)
+app.include_router(sequences_api_router)
+app.include_router(enrollments_api_router)
+app.include_router(templates_router)
+app.include_router(outbox_router)
+app.include_router(growth_router)
+app.include_router(geoip_router)
 
 
 @app.middleware("http")
 async def request_logging_middleware(request: Request, call_next):
     request_id = request.headers.get("X-Request-ID", str(uuid.uuid4()))
+    request.state.request_id = request_id
     bind_request_context(request_id=request_id)
     logger.info("request.received", method=request.method, path=str(request.url.path))
     try:
@@ -275,6 +318,10 @@ class MicrosoftLoginRequest(BaseModel):
     id_token: str
 
 
+class AppleLoginRequest(BaseModel):
+    id_token: str
+
+
 class PasswordResetRequest(BaseModel):
     email: EmailStr
 
@@ -362,6 +409,9 @@ class LeadResponse(BaseModel):
     quality_validation_status: Optional[str] = None
     street_view_quality: Optional[dict] = None
     roof_intelligence: Optional[dict] = None
+    analysis_confidence: Optional[float] = None
+    overlay_url: Optional[str] = None
+    score_version: Optional[str] = None
     area_scan_id: Optional[int]
     status: str
     created_at: str
@@ -402,9 +452,32 @@ class LeadFilter(BaseModel):
 async def root():
     return {"message": "Fish Mouth AI API", "status": "online"}
 
+@app.get("/healthz")
+async def healthz() -> dict:
+    return {
+        "status": "ok",
+        "service": "backend",
+        "timestamp": datetime.utcnow().isoformat(),
+    }
+
+
+@app.get("/readyz")
+async def readyz(db: Session = Depends(get_db)) -> dict:
+    try:
+        db.execute(text("SELECT 1"))
+        return {
+            "status": "healthy",
+            "service": "backend",
+            "timestamp": datetime.utcnow().isoformat(),
+        }
+    except Exception as exc:  # pragma: no cover - defensive
+        logger.error("readyz.failed", error=str(exc))
+        raise HTTPException(status_code=503, detail="service unavailable") from exc
+
+
 @app.get("/health")
-async def health():
-    return {"status": "healthy"}
+async def legacy_health():
+    return await readyz()
 
 @app.post("/auth/signup", response_model=Token)
 async def signup(user: UserCreate, db: Session = Depends(get_db)):
@@ -423,7 +496,19 @@ async def signup(user: UserCreate, db: Session = Depends(get_db)):
         hashed_password=hashed_password,
         company_name=user.company_name,
         phone=user.phone,
-        role="user"
+        role="user",
+        lead_credits=3,
+        gift_credits_awarded=150,
+        gift_leads_awarded=3,
+        gift_awarded_at=datetime.utcnow(),
+        onboarding_state={
+            "welcome_shown": False,
+            "steps_completed": [],
+            "gift_summary": {
+                "lead_credits": 3,
+                "wallet_bonus": 150,
+            },
+        },
     )
     db.add(new_user)
     db.commit()
@@ -442,7 +527,11 @@ async def signup(user: UserCreate, db: Session = Depends(get_db)):
             "id": new_user.id,
             "email": new_user.email,
             "company_name": new_user.company_name,
-            "role": new_user.role
+            "role": new_user.role,
+            "lead_credits": new_user.lead_credits,
+            "gift_credits_awarded": new_user.gift_credits_awarded,
+            "gift_leads_awarded": new_user.gift_leads_awarded,
+            "gift_awarded_at": new_user.gift_awarded_at.isoformat() if new_user.gift_awarded_at else None,
         }
     }
 
@@ -476,7 +565,11 @@ async def login(user: UserLogin, db: Session = Depends(get_db)):
             "email": db_user.email,
             "company_name": db_user.company_name,
             "phone": db_user.phone,
-            "role": db_user.role
+            "role": db_user.role,
+            "lead_credits": db_user.lead_credits,
+            "gift_credits_awarded": db_user.gift_credits_awarded,
+            "gift_leads_awarded": db_user.gift_leads_awarded,
+            "gift_awarded_at": db_user.gift_awarded_at.isoformat() if db_user.gift_awarded_at else None,
         }
     }
 
@@ -549,6 +642,71 @@ async def microsoft_login(payload: MicrosoftLoginRequest, db: Session = Depends(
     db_user = db.query(User).filter(User.email == email).first()
     if not db_user:
         db_user = User(email=email, hashed_password=get_password_hash(uuid.uuid4().hex), role="user")
+        db.add(db_user)
+        db.commit()
+        db.refresh(db_user)
+
+    if not db_user.is_active:
+        raise HTTPException(status_code=400, detail="Inactive user")
+
+    access_token_expires = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
+    access_token = create_access_token(data={"sub": db_user.email}, expires_delta=access_token_expires)
+
+    return {
+        "access_token": access_token,
+        "token_type": "bearer",
+        "user": {
+            "id": db_user.id,
+            "email": db_user.email,
+            "company_name": db_user.company_name,
+            "phone": db_user.phone,
+            "role": db_user.role,
+        },
+    }
+
+
+@app.post("/auth/apple", response_model=Token)
+async def apple_login(payload: AppleLoginRequest, db: Session = Depends(get_db)):
+    # Parse Apple identity token (JWT). For production, validate signature against Apple's JWKS.
+    try:
+        parts = payload.id_token.split(".")
+        if len(parts) != 3:
+            raise HTTPException(status_code=400, detail="Invalid ID token")
+
+        import base64
+        import json as _json
+
+        def b64url_decode(data: str) -> bytes:
+            padding = '=' * (-len(data) % 4)
+            return base64.urlsafe_b64decode(data + padding)
+
+        claims = _json.loads(b64url_decode(parts[1]).decode("utf-8"))
+        email = claims.get("email")
+        if not email:
+            sub = claims.get("sub")
+            if not sub:
+                raise HTTPException(status_code=400, detail="Email not present in token")
+            email = f"{sub}@appleid.apple.com"
+        email = email.lower()
+        name_claim = claims.get("name")
+        if isinstance(name_claim, dict):
+            full_name = " ".join(filter(None, [name_claim.get("firstName"), name_claim.get("lastName")])).strip()
+            full_name = full_name or None
+        else:
+            full_name = str(name_claim).strip() if name_claim else None
+    except HTTPException:
+        raise
+    except Exception:
+        raise HTTPException(status_code=400, detail="Failed to parse Apple token")
+
+    db_user = db.query(User).filter(User.email == email).first()
+    if not db_user:
+        db_user = User(
+            email=email,
+            hashed_password=get_password_hash(uuid.uuid4().hex),
+            role="user",
+            full_name=full_name,
+        )
         db.add(db_user)
         db.commit()
         db.refresh(db_user)
@@ -967,6 +1125,10 @@ async def get_scan_results(
             priority=lead.priority.value if lead.priority else "cold",
             replacement_urgency=lead.replacement_urgency,
             damage_indicators=lead.damage_indicators,
+            discovery_status=lead.discovery_status,
+            imagery_status=lead.imagery_status,
+            property_enrichment_status=lead.property_enrichment_status,
+            contact_enrichment_status=lead.contact_enrichment_status,
             homeowner_name=lead.homeowner_name,
             homeowner_phone=lead.homeowner_phone,
             homeowner_email=lead.homeowner_email,
@@ -979,9 +1141,14 @@ async def get_scan_results(
             quality_validation_status=lead.quality_validation_status,
             street_view_quality=lead.street_view_quality,
             roof_intelligence=lead.roof_intelligence,
+            analysis_confidence=lead.analysis_confidence,
+            overlay_url=lead.overlay_url,
+            score_version=lead.score_version,
             area_scan_id=lead.area_scan_id,
             status=lead.status.value if lead.status else "new",
-            created_at=lead.created_at.isoformat()
+            created_at=lead.created_at.isoformat(),
+            voice_opt_out=lead.voice_opt_out,
+            last_voice_contacted=lead.last_voice_contacted.isoformat() if lead.last_voice_contacted else None,
         )
         for lead in leads
     ]
@@ -1032,6 +1199,10 @@ async def get_leads(
             priority=lead.priority.value if lead.priority else "cold",
             replacement_urgency=lead.replacement_urgency,
             damage_indicators=lead.damage_indicators,
+            discovery_status=lead.discovery_status,
+            imagery_status=lead.imagery_status,
+            property_enrichment_status=lead.property_enrichment_status,
+            contact_enrichment_status=lead.contact_enrichment_status,
             homeowner_name=lead.homeowner_name,
             homeowner_phone=lead.homeowner_phone,
             homeowner_email=lead.homeowner_email,
@@ -1039,9 +1210,19 @@ async def get_leads(
             estimated_value=lead.estimated_value,
             conversion_probability=lead.conversion_probability,
             ai_analysis=lead.ai_analysis,
+            image_quality_score=lead.image_quality_score,
+            image_quality_issues=lead.image_quality_issues,
+            quality_validation_status=lead.quality_validation_status,
+            street_view_quality=lead.street_view_quality,
+            roof_intelligence=lead.roof_intelligence,
+            analysis_confidence=lead.analysis_confidence,
+            overlay_url=lead.overlay_url,
+            score_version=lead.score_version,
             area_scan_id=lead.area_scan_id,
             status=lead.status.value if lead.status else "new",
-            created_at=lead.created_at.isoformat()
+            created_at=lead.created_at.isoformat(),
+            voice_opt_out=lead.voice_opt_out,
+            last_voice_contacted=lead.last_voice_contacted.isoformat() if lead.last_voice_contacted else None,
         )
         for lead in leads
     ]
@@ -1093,6 +1274,9 @@ async def export_leads(
         "damage_indicators",
         "image_quality_score",
         "quality_validation_status",
+        "analysis_confidence",
+        "score_version",
+        "overlay_url",
         "area_scan_id",
         "created_at",
     ])
@@ -1120,6 +1304,9 @@ async def export_leads(
             "; ".join(lead.damage_indicators or []),
             lead.image_quality_score,
             lead.quality_validation_status,
+            lead.analysis_confidence,
+            lead.score_version,
+            lead.overlay_url,
             lead.area_scan_id,
             lead.created_at.isoformat(),
         ])
@@ -1163,6 +1350,10 @@ async def get_lead(
         priority=lead.priority.value if lead.priority else "cold",
         replacement_urgency=lead.replacement_urgency,
         damage_indicators=lead.damage_indicators,
+        discovery_status=lead.discovery_status,
+        imagery_status=lead.imagery_status,
+        property_enrichment_status=lead.property_enrichment_status,
+        contact_enrichment_status=lead.contact_enrichment_status,
         homeowner_name=lead.homeowner_name,
         homeowner_phone=phone,
         homeowner_email=email,
@@ -1175,6 +1366,9 @@ async def get_lead(
         quality_validation_status=lead.quality_validation_status,
         street_view_quality=lead.street_view_quality,
         roof_intelligence=lead.roof_intelligence,
+        analysis_confidence=lead.analysis_confidence,
+        overlay_url=lead.overlay_url,
+        score_version=lead.score_version,
         area_scan_id=lead.area_scan_id,
         status=lead.status.value if lead.status else "new",
         created_at=lead.created_at.isoformat(),
@@ -2645,4 +2839,3 @@ async def update_voice_config(
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8000)
-

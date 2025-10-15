@@ -1,0 +1,72 @@
+{
+  "info": {
+    "name": "Fish Mouth Data & Geo Pack",
+    "_postman_id": "data-geo-collection",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "item": [
+    {
+      "name": "Create Scan",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": {
+          "raw": "{{api}}/api/v1/scans",
+          "host": [
+            "{{api}}"
+          ],
+          "path": [
+            "api",
+            "v1",
+            "scans"
+          ]
+        },
+        "body": {
+          "mode": "raw",
+          "raw": "{\"name\": \"My Area\", \"area_geojson\": {\"type\": \"FeatureCollection\", \"features\": []}}"
+        }
+      }
+    },
+    {
+      "name": "Map Leads",
+      "request": {
+        "method": "GET",
+        "url": {
+          "raw": "{{api}}/api/v1/maps/leads?west=-123&south=36&east=-121&north=38",
+          "host": [
+            "{{api}}"
+          ],
+          "path": [
+            "api",
+            "v1",
+            "maps",
+            "leads"
+          ],
+          "query": [
+            {
+              "key": "west",
+              "value": "-123"
+            },
+            {
+              "key": "south",
+              "value": "36"
+            },
+            {
+              "key": "east",
+              "value": "-121"
+            },
+            {
+              "key": "north",
+              "value": "38"
+            }
+          ]
+        }
+      }
+    }
+  ]
+}

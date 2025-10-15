@@ -15,6 +15,8 @@ import asyncpg
 import redis.asyncio as redis
 from fastapi import FastAPI, HTTPException, BackgroundTasks
 from pydantic import BaseModel
+
+import structlog
 import cv2
 from PIL import Image
 import torch
@@ -23,11 +25,20 @@ from torchvision import transforms
 from ultralytics import YOLO
 
 # Add shared directory to path
-sys.path.append('/app/shared')
+ROOT_DIR = Path(__file__).resolve().parents[2]
+if str(ROOT_DIR) not in sys.path:
+    sys.path.append(str(ROOT_DIR))
+
+from shared.observability import RequestContextMiddleware, setup_observability
 from database import DatabaseClient
 from redis_client import RedisClient
 
+SERVICE_NAME = "ml-inference"
+setup_observability(SERVICE_NAME)
+logger = structlog.get_logger(SERVICE_NAME)
+
 app = FastAPI(title="ML Inference Service", version="1.0.0")
+app.add_middleware(RequestContextMiddleware, service_name=SERVICE_NAME)
 
 # Configuration
 DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://fishmouth:fishmouth123@localhost:5432/fishmouth")
@@ -167,7 +178,7 @@ async def load_models():
         "detector": MockDamageDetector(),
         "segmentor": MockRoofSegmentor()
     }
-    print("Loaded ML models successfully")
+    logger.info("models.loaded", count=len(models))
 
 # Startup and shutdown events
 @app.on_event("startup")
@@ -178,6 +189,7 @@ async def startup():
     redis_client = RedisClient()
     await redis_client.connect()
     await load_models()
+    logger.info("startup.success")
 
 @app.on_event("shutdown")
 async def shutdown():
@@ -185,10 +197,20 @@ async def shutdown():
         await db_client.close()
     if redis_client:
         await redis_client.close()
+    logger.info("shutdown.success")
 
-@app.get("/health")
-async def health_check():
-    """Health check endpoint"""
+@app.get("/healthz")
+async def healthz():
+    return {
+        "status": "ok",
+        "service": SERVICE_NAME,
+        "timestamp": datetime.utcnow().isoformat(),
+    }
+
+
+@app.get("/readyz")
+async def readyz():
+    """Readiness check ensuring downstream dependencies are reachable."""
     try:
         # Check database connection
         await db_client.execute("SELECT 1")
@@ -197,7 +219,7 @@ async def health_check():
         
         return {
             "status": "healthy",
-            "service": "ml-inference",
+            "service": SERVICE_NAME,
             "port": 8013,
             "database": "connected",
             "redis": "connected",
@@ -205,12 +227,13 @@ async def health_check():
             "available_models": list(models.keys())
         }
     except Exception as e:
-        return {
-            "status": "unhealthy",
-            "service": "ml-inference", 
-            "port": 8013,
-            "error": str(e)
-        }
+        logger.error("readyz.failed", error=str(e))
+        raise HTTPException(status_code=503, detail=str(e))
+
+
+@app.get("/health")
+async def legacy_health():
+    return await readyz()
 
 @app.post("/analyze/property")
 async def analyze_property(request: PropertyAnalysisRequest, background_tasks: BackgroundTasks):
@@ -289,10 +312,10 @@ async def process_property_analysis(property_id: str, images: List[dict]):
         # Save to database
         await save_roof_analysis(property_id, overall_analysis, all_results)
         
-        print(f"Completed analysis for property {property_id}")
+    logger.info("analysis.completed", property_id=property_id)
         
     except Exception as e:
-        print(f"Error analyzing property {property_id}: {str(e)}")
+        logger.error("analysis.failed", property_id=property_id, error=str(e))
 
 def aggregate_analysis_results(results: Dict) -> Dict:
     """Aggregate analysis results from multiple images"""
@@ -393,10 +416,10 @@ async def save_roof_analysis(property_id: str, overall_analysis: Dict, detailed_
         "mock_segmentor", models["segmentor"].model_version,
         "pending", datetime.now(), datetime.now())
         
-        print(f"Saved roof analysis {analysis_id} for property {property_id}")
+        logger.info("analysis.saved", property_id=property_id, analysis_id=str(analysis_id))
         
     except Exception as e:
-        print(f"Error saving roof analysis: {str(e)}")
+        logger.error("analysis.persist_failed", error=str(e))
 
 @app.post("/analyze/image")
 async def analyze_single_image(request: ImageAnalysisRequest):

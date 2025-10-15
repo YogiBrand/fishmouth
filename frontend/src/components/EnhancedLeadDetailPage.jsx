@@ -223,6 +223,7 @@ const EnhancedLeadDetailPage = ({ lead, onRewardPoints = () => {} }) => {
   const imageryContext = useMemo(() => buildLeadImageryContext(lead), [lead]);
   const [selectedImagery, setSelectedImagery] = useState(() => imageryContext.imageryTiles?.[0] || null);
   const [showLightbox, setShowLightbox] = useState(false);
+  const [overlayVisible, setOverlayVisible] = useState(true);
   const [timelineLoading, setTimelineLoading] = useState(false);
   const [timeline, setTimeline] = useState(() =>
     (lead?.activities || [])
@@ -325,7 +326,7 @@ const EnhancedLeadDetailPage = ({ lead, onRewardPoints = () => {} }) => {
   }, [lead?.id]);
 
   const heroBase = selectedImagery?.imageUrl || imageryContext.baseImage;
-  const heroOverlay = selectedImagery?.overlayUrl || null;
+  const heroOverlay = overlayVisible ? selectedImagery?.overlayUrl || null : null;
   const topAnomaly = imageryContext.topAnomaly;
   const anomalies = imageryContext.anomalies;
   const streetViews = imageryContext.streetViews;
@@ -337,6 +338,12 @@ const EnhancedLeadDetailPage = ({ lead, onRewardPoints = () => {} }) => {
       : null;
   const leadScore = lead?.lead_score ?? lead?.score ?? lead?.total_urgency_score ?? 0;
   const imageryQualityMetrics = imageryContext.imageryQuality?.metrics;
+  const leadConfidence = lead?.analysis_confidence ?? lead?.ai_analysis?.confidence ?? null;
+  const confidenceBadge = leadConfidence !== null ? (
+    <div className="px-3 py-1 rounded-full text-sm font-semibold bg-sky-500/10 text-sky-600 dark:text-sky-300 border border-sky-500/30">
+      Confidence {Math.round(Math.min(Math.max(leadConfidence, 0), 0.995) * 100)}%
+    </div>
+  ) : null;
   const homeownerName = lead?.homeowner_name || lead?.owner_name || lead?.name || lead?.address;
   const homeownerEmail = lead?.homeowner_email || lead?.email;
   const homeownerPhone = lead?.homeowner_phone || lead?.phone || lead?.owner_phone;
@@ -570,14 +577,15 @@ const EnhancedLeadDetailPage = ({ lead, onRewardPoints = () => {} }) => {
             </div>
           </div>
           
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-3 flex-wrap">
             <div className={`px-3 py-1 rounded-full text-sm font-semibold ${getScoreColor(leadScore)}`}>
               Score: {Math.round(leadScore)}
             </div>
             <div className={`px-3 py-1 rounded-full text-sm font-semibold ${getStatusBadge(replacementStatus)}`}>
               {statusLabel}
             </div>
-      </div>
+            {confidenceBadge}
+          </div>
     </div>
   </div>
 
@@ -611,6 +619,15 @@ const EnhancedLeadDetailPage = ({ lead, onRewardPoints = () => {} }) => {
         <div className="absolute top-4 right-4 inline-flex items-center gap-2 px-3 py-1 text-[10px] font-semibold rounded-full bg-white dark:bg-slate-900/70/80 text-gray-800 dark:text-slate-200 uppercase tracking-wide">
           {selectedImagery.badge}
         </div>
+      )}
+      {selectedImagery?.overlayUrl && (
+        <button
+          type="button"
+          onClick={() => setOverlayVisible((prev) => !prev)}
+          className="absolute top-4 right-32 inline-flex items-center gap-2 px-3 py-1.5 text-xs font-semibold rounded-full bg-white/85 dark:bg-slate-900/80 text-gray-800 dark:text-slate-100 border border-gray-200/70 hover:bg-white"
+        >
+          {overlayVisible ? 'Hide Overlay' : 'Show Overlay'}
+        </button>
       )}
       {topAnomaly && (
         <div className="absolute bottom-4 left-4 flex flex-wrap items-center gap-2">
@@ -690,7 +707,7 @@ const EnhancedLeadDetailPage = ({ lead, onRewardPoints = () => {} }) => {
                 className={`w-full h-full object-cover transition-opacity duration-300 ${isActive ? 'opacity-100' : 'opacity-95 group-hover:opacity-100'}`}
                 loading="lazy"
               />
-              {tile.overlayUrl && (
+              {overlayVisible && tile.overlayUrl && (
                 <img
                   src={tile.overlayUrl}
                   alt={`${tile.label} overlay`}
@@ -1084,7 +1101,7 @@ const EnhancedLeadDetailPage = ({ lead, onRewardPoints = () => {} }) => {
             </button>
             <div className="aspect-video bg-black">
               <img src={selectedImagery.imageUrl} alt={selectedImagery.label} className="w-full h-full object-cover" />
-              {selectedImagery.overlayUrl && (
+              {overlayVisible && selectedImagery.overlayUrl && (
                 <img
                   src={selectedImagery.overlayUrl}
                   alt={`${selectedImagery.label} overlay`}

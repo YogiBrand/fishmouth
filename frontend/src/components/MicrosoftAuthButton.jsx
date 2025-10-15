@@ -1,41 +1,22 @@
-import React, { useEffect, useRef } from 'react';
+import React, { useCallback, useEffect } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 
-export default function MicrosoftAuthButton({ onSuccess, compact = true }) {
+export default function MicrosoftAuthButton({
+  onSuccess,
+  onError,
+  compact = true,
+  hidden = false,
+  exposeController,
+}) {
   const { loginWithMicrosoft } = useAuth();
-  const buttonRef = useRef(null);
+  const isAvailable = Boolean(process.env.REACT_APP_MS_CLIENT_ID);
 
-  useEffect(() => {
-    // We will use Microsoft OAuth 2.0 implicit id token via msal-browser if available
-    // For minimal footprint, we lazily import msal-browser only when client ID is present
+  const handleLogin = useCallback(async () => {
     const clientId = process.env.REACT_APP_MS_CLIENT_ID;
-    if (!clientId) return;
-    let msalInstance;
-    (async () => {
-      try {
-        const msal = await import('@azure/msal-browser');
-        msalInstance = new msal.PublicClientApplication({
-          auth: {
-            clientId,
-            authority: 'https://login.microsoftonline.com/common',
-            redirectUri: window.location.origin,
-          },
-          cache: { cacheLocation: 'localStorage' },
-        });
-        if (buttonRef.current) {
-          // Render our own button
-        }
-      } catch (_) {}
-    })();
-
-    return () => {
-      msalInstance = null;
-    };
-  }, []);
-
-  const handleLogin = async () => {
-    const clientId = process.env.REACT_APP_MS_CLIENT_ID;
-    if (!clientId) return;
+    if (!clientId) {
+      if (typeof onError === 'function') onError('Microsoft login unavailable');
+      return;
+    }
     try {
       const msal = await import('@azure/msal-browser');
       const msalInstance = new msal.PublicClientApplication({
@@ -45,14 +26,31 @@ export default function MicrosoftAuthButton({ onSuccess, compact = true }) {
       const resp = await msalInstance.loginPopup({ scopes: ['openid', 'email', 'profile'] });
       const idToken = resp.idToken;
       const result = await loginWithMicrosoft(idToken);
-      if (result?.success && typeof onSuccess === 'function') onSuccess(result);
+      if (result?.success) {
+        if (typeof onSuccess === 'function') onSuccess(result);
+      } else if (typeof onError === 'function') {
+        onError(result?.error || 'Microsoft login failed');
+      }
     } catch (e) {
-      // eslint-disable-next-line no-console
-      console.debug('MS login failed', e);
+      if (e?.errorCode === 'user_cancelled' || e?.errorMessage === 'user_cancelled') {
+        if (typeof onError === 'function') onError('');
+        return;
+      }
+      if (typeof onError === 'function') onError(e?.message || 'Microsoft login failed');
     }
-  };
+  }, [loginWithMicrosoft, onSuccess, onError]);
 
-  if (!process.env.REACT_APP_MS_CLIENT_ID) {
+  useEffect(() => {
+    if (typeof exposeController === 'function') {
+      exposeController({ open: handleLogin, isReady: isAvailable, isAvailable });
+    }
+  }, [exposeController, handleLogin, isAvailable]);
+
+  if (hidden) {
+    return null;
+  }
+
+  if (!isAvailable) {
     return (
       <button
         type="button"
@@ -69,7 +67,6 @@ export default function MicrosoftAuthButton({ onSuccess, compact = true }) {
     <button
       type="button"
       onClick={handleLogin}
-      ref={buttonRef}
       className={`inline-flex items-center justify-center ${compact ? 'h-10 w-10 rounded-full' : 'w-full py-3.5 rounded-xl'} bg-white text-gray-800 font-semibold border-2 border-gray-200 hover:bg-gray-50`}
       title="Sign in with Microsoft"
       aria-label="Sign in with Microsoft"
@@ -81,5 +78,3 @@ export default function MicrosoftAuthButton({ onSuccess, compact = true }) {
     </button>
   );
 }
-
-

@@ -8,6 +8,7 @@ from typing import Optional
 import httpx
 
 from config import get_settings
+from services.etl.politeness import PoliteFetcher, SitePolitenessPolicy
 from services.resilience import AsyncRateLimiter, CircuitBreaker
 
 
@@ -39,6 +40,17 @@ class ContactEnrichmentService:
             recovery_timeout=resilience.provider_recovery_seconds,
         )
         self._retry_attempts = resilience.provider_retry_attempts
+        self._fetcher = PoliteFetcher(
+            self._client,
+            policies=[
+                SitePolitenessPolicy(
+                    domain="api.truepeoplesearch.io",
+                    delay_seconds=0.75,
+                    respect_robots=True,
+                    headers={"Accept": "application/json"},
+                )
+            ],
+        )
 
     async def enrich(self, address: str, city: Optional[str], state: Optional[str]) -> ContactProfile:
         if not settings.feature_flags.use_mock_contact_enrichment:
@@ -59,7 +71,7 @@ class ContactEnrichmentService:
         for attempt in range(1, self._retry_attempts + 1):
             try:
                 async with self._rate_limiter:
-                    response = await self._client.get(
+                    response = await self._fetcher.get(
                         "https://api.truepeoplesearch.io/v1/lookup",
                         params={"q": query, "key": settings.providers.contact_enrichment_api_key},
                     )

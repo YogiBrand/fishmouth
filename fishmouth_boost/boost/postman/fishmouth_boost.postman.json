@@ -1,0 +1,65 @@
+{
+  "info": {
+    "name": "Fish Mouth Boost",
+    "_postman_id": "boost-collection",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "item": [
+    {
+      "name": "Render Report",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": {
+          "raw": "{{api}}/api/v1/reports/TEST/render",
+          "host": [
+            "{{api}}"
+          ],
+          "path": [
+            "api",
+            "v1",
+            "reports",
+            "TEST",
+            "render"
+          ]
+        },
+        "body": {
+          "mode": "raw",
+          "raw": "{\"force\": true, \"html\": \"<html><body><h1>Test</h1></body></html>\"}"
+        }
+      }
+    },
+    {
+      "name": "Client Event",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": {
+          "raw": "{{api}}/api/v1/events",
+          "host": [
+            "{{api}}"
+          ],
+          "path": [
+            "api",
+            "v1",
+            "events"
+          ]
+        },
+        "body": {
+          "mode": "raw",
+          "raw": "{\"type\": \"ui.viewer_open\", \"payload\": {\"page\": \"report\"}}"
+        }
+      }
+    }
+  ]
+}
