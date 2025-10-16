@@ -10,6 +10,7 @@ services:
     depends_on:
       telemetry_gw_8030:
         condition: service_started
+    ports: ["8101:8001"]
 
   address_lookup_8022:
     build:
@@ -103,3 +104,16 @@ services:
       telemetry_gw_8030:
         condition: service_started
     ports: ["8028:8028"]
+
+  onboarding_8034:
+    build:
+      context: ..
+      dockerfile: app/services/onboarding-8034/Dockerfile
+    environment:
+      SERVICE_NAME: onboarding-8034
+      TELEMETRY_URL: http://telemetry_gw_8030:8030
+      DATABASE_URL: postgresql://user:pass@postgres:5432/app
+    depends_on:
+      telemetry_gw_8030:
+        condition: service_started
+    ports: ["8034:8034"]

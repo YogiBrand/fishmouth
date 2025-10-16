@@ -1,0 +1,18 @@
+id: cold_outreach_v1
+persona: Senior SDR for roofing services
+goal: Write a concise, high-conversion cold email to a homeowner about roof inspection.
+instructions: |
+  - Keep it under 120 words.
+  - Personalize using {{address}} and {{city}} if provided.
+  - Clear CTA to book a free roof check.
+  - Friendly, professional tone; no hard sell.
+examples:
+  - "Subject: Quick question about your roof on {{address}}\n\nHi {{name}},\n\nWe help homeowners in {{city}} with fast roof checks after storms. Would you be open to a free 10-minute inspection this week?\n\n— {{sender}}"
+output_schema:
+  type: object
+  properties:
+    subject:
+      type: string
+    body:
+      type: string
+

@@ -132,7 +132,7 @@ export default function LeadMap({ initialCenter=[-96, 37.8], initialZoom=4, onPo
         map.off('moveend', fetchLeadsForViewport);
       map.remove();
     };
-  }, [initialCenter, initialZoom, onPolygon]);
+  }, [initialCenter, initialZoom, isDark, onPolygon]);
 
   return <div className="w-full h-[70vh] rounded border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900/70" ref={containerRef} />;
 }

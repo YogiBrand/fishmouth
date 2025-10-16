@@ -14,22 +14,6 @@ const ACTION_POINT_VALUES = {
 
 const TOTAL_ACTION_POINTS = Object.values(ACTION_POINT_VALUES).reduce((sum, value) => sum + value, 0);
 
-const URGENCY_LABELS = {
-  critical: 'Critical',
-  high: 'High',
-  medium: 'Warm',
-  normal: 'Fresh',
-  unknown: 'Queued',
-};
-
-const URGENCY_BADGES = {
-  critical: 'bg-red-500/20 text-red-200 border border-red-500/40',
-  high: 'bg-amber-500/20 text-amber-200 border border-amber-500/40',
-  medium: 'bg-yellow-500/20 text-yellow-200 border border-yellow-500/40',
-  normal: 'bg-emerald-500/20 text-emerald-200 border border-emerald-500/35',
-  unknown: 'bg-slate-500/20 text-slate-200 border border-slate-500/35',
-};
-
 const MAPBOX_TOKEN = process.env.REACT_APP_MAPBOX_TOKEN || '';
 const SATELLITE_TILE_TEMPLATE = process.env.REACT_APP_SATELLITE_TILE_TEMPLATE || '';
 

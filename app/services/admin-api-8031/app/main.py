@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from fastapi import FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 import os, asyncpg, uuid
 import httpx, asyncio, time
@@ -8,12 +9,16 @@ from typing import List, Optional, Dict, Any
 from .routes_messaging import router as messaging_router
 from .routes_queues import router as queues_router
 from .routes_messaging_provider_send import router as send_router
+from .routes_scraper import router as scraper_router
+from .routes_leads import router as leads_router
 from services.shared.telemetry_middleware import TelemetryMW
 
 app = FastAPI(title="Admin API", version="0.1.0")
 app.include_router(messaging_router)
 app.include_router(queues_router)
 app.include_router(send_router)
+app.include_router(leads_router)
+app.include_router(scraper_router)
 app.add_middleware(TelemetryMW)
 DB_URL = os.getenv("ANALYTICS_URL", os.getenv("DATABASE_URL","postgresql://user:pass@postgres:5432/app"))
 TELEMETRY_URL = os.getenv("TELEMETRY_URL", "http://telemetry_gw_8030:8030")
@@ -21,6 +26,16 @@ SERVICE_ID = "8031"
 pool = None
 REDIS_HOST = os.getenv("REDIS_HOST", "redis")
 REDIS_PORT = int(os.getenv("REDIS_PORT", "6379"))
+
+# CORS (allow localhost admin UI and Vite dev by default; override via CORS_ORIGINS)
+_allowed = os.getenv("CORS_ORIGINS", "http://localhost:3031,http://localhost:5173").split(",")
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[o.strip() for o in _allowed if o.strip()],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 SERVICE_TARGETS = [
     {"name": "Backend API", "group": "core", "url": os.getenv("BACKEND_HEALTH_URL", "http://backend:8000/health")},

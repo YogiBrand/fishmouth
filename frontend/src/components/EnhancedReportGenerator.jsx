@@ -1332,7 +1332,13 @@ const EnhancedReportGenerator = ({ lead: initialLead, businessProfile, onClose, 
 
   return (
     <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4">
-      <div className="rounded-xl max-w-7xl w-full max-h-[90vh] overflow-hidden flex flex-col border ${typeof document !== 'undefined' && document.documentElement.classList.contains('dark') ? 'border-slate-800 bg-slate-900' : 'border-slate-200 bg-white'}">
+      <div
+        className={`rounded-xl max-w-7xl w-full max-h-[90vh] overflow-hidden flex flex-col border ${
+          typeof document !== 'undefined' && document.documentElement.classList.contains('dark')
+            ? 'border-slate-800 bg-slate-900'
+            : 'border-slate-200 bg-white'
+        }`}
+      >
         {/* Header */}
         <div className={`flex items-center justify-between p-6 border-b ${typeof document !== 'undefined' && document.documentElement.classList.contains('dark') ? 'border-slate-800' : 'border-slate-200'}`}>
           <div className="flex items-center space-x-4">

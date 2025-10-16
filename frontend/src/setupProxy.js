@@ -45,5 +45,19 @@ module.exports = function(app) {
   app.use('/auth', createProxyMiddleware(proxyConfig));
   app.use('/api', createProxyMiddleware(proxyConfig));
   app.use('/health', createProxyMiddleware(proxyConfig));
+
+  // Admin API (8031) proxy for lead scanning and admin endpoints
+  const adminUrl = process.env.REACT_APP_ADMIN_API || 'http://localhost:8031';
+  console.log('[Proxy] 🔗 Admin API URL:', adminUrl);
+  const adminProxy = {
+    ...proxyConfig,
+    target: adminUrl,
+    // Long-running scan may take up to ~120s; extend proxy timeouts
+    timeout: 180000,
+    proxyTimeout: 180000,
+    // Strip the /admin prefix so Admin API receives /leads/... not /admin/leads/...
+    pathRewrite: { '^/admin': '' },
+  };
+  app.use('/admin', createProxyMiddleware(adminProxy));
 };
 

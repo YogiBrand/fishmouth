@@ -23,3 +23,17 @@ def record_job(job_id: str, status: str, percent: int):
         "id": job_id, "status": status, "percent": percent,
         "updated_at": datetime.utcnow().isoformat()
     })
+
+@router.post("/jobs/generate")
+def generate_jobs(count: int = 5):
+    now = datetime.utcnow().isoformat()
+    for i in range(count):
+        JOBS.append({
+            "id": f"demo-{len(JOBS)+1}",
+            "status": "running" if i % 2 == 0 else "queued",
+            "percent": (i * 20) % 100,
+            "queue": "lead-enrichment" if i % 2 == 0 else "vision",
+            "updated_at": now,
+            "created_at": now,
+        })
+    return {"generated": count, "total": len(JOBS)}

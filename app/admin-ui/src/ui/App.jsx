@@ -16,6 +16,8 @@ import Costs from './pages/Costs.jsx'
 import Health from './pages/Health.jsx'
 import Messaging from './pages/Messaging.jsx'
 import JobsQueues from './pages/JobsQueues.jsx'
+import Leads from './pages/Leads.jsx'
+import Permits from './pages/Permits.jsx'
 import LayoutShell from './components/LayoutShell.jsx'
 import { ThemeProvider } from './theme/ThemeProvider.jsx'
 import { ToastProvider } from './components/ToastProvider.jsx'
@@ -27,6 +29,8 @@ const NAVIGATION = [
     items: [
       { label: 'Overview', icon: LayoutDashboard, to: '/', exact: true },
       { label: 'Messaging', icon: MessageSquare, to: '/messaging' },
+      { label: 'Leads', icon: LayoutDashboard, to: '/leads' },
+      { label: 'Permits', icon: ServerCog, to: '/permits' },
       { label: 'Jobs & Queues', icon: ServerCog, to: '/jobs' },
     ],
   },
@@ -56,6 +60,8 @@ export default function App() {
             <Route path="/costs" element={<Costs />} />
             <Route path="/health" element={<Health />} />
             <Route path="/messaging" element={<Messaging />} />
+            <Route path="/leads" element={<Leads />} />
+            <Route path="/permits" element={<Permits />} />
             <Route path="/jobs" element={<JobsQueues />} />
           </Routes>
         </LayoutShell>

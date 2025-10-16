@@ -7,17 +7,7 @@ import DataTable from '../components/DataTable.jsx'
 import Button from '../components/Button.jsx'
 import { LoadingState, ErrorState } from '../components/LoadingState.jsx'
 import { useToast } from '../components/ToastProvider.jsx'
-
-const API = import.meta.env.VITE_ADMIN_API
-
-const fetchJSON = async (path) => {
-  const res = await fetch(`${API}${path}`)
-  if (!res.ok) {
-    const body = await res.text()
-    throw new Error(body || `Request failed with ${res.status}`)
-  }
-  return res.json()
-}
+import { fetchJSON } from '../lib/api.js'
 
 const statusTone = (status) => {
   if (!status) return 'neutral'

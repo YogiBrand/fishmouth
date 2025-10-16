@@ -16,17 +16,7 @@ import { MultiLineChart } from '../components/TrendChart.jsx'
 import { LoadingState, ErrorState } from '../components/LoadingState.jsx'
 import Badge from '../components/Badge.jsx'
 import { useToast } from '../components/ToastProvider.jsx'
-
-const API = import.meta.env.VITE_ADMIN_API
-
-const fetchJSON = async (url, options) => {
-  const res = await fetch(url, options)
-  if (!res.ok) {
-    const text = await res.text()
-    throw new Error(text || `Request failed with ${res.status}`)
-  }
-  return res.json()
-}
+import { fetchJSON } from '../lib/api.js'
 
 const formatCurrency = (value) =>
   value.toLocaleString(undefined, { style: 'currency', currency: 'USD', maximumFractionDigits: 2 })
@@ -52,7 +42,7 @@ export default function Users() {
         if (term) {
           params.set('search', term)
         }
-        const data = await fetchJSON(`${API}/users?${params.toString()}`)
+        const data = await fetchJSON(`/users?${params.toString()}`)
         setRows(data)
       } catch (err) {
         setError(err)
@@ -87,7 +77,7 @@ export default function Users() {
       }
       setDetailLoading(true)
       try {
-        const data = await fetchJSON(`${API}/users/${user.user_id}`)
+        const data = await fetchJSON(`/users/${user.user_id}`)
         setDetail(data)
       } catch (err) {
         pushToast({ title: err.message || 'Failed to load user detail', tone: 'error' })
@@ -109,7 +99,7 @@ export default function Users() {
       if (!selected) return
       setActionPending(true)
       try {
-        await fetchJSON(`${API}/users/${selected.user_id}/credits`, {
+        await fetchJSON(`/users/${selected.user_id}/credits`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ delta }),
@@ -131,7 +121,7 @@ export default function Users() {
       if (!selected) return
       setActionPending(true)
       try {
-        await fetchJSON(`${API}/users/${selected.user_id}/refunds`, {
+        await fetchJSON(`/users/${selected.user_id}/refunds`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ amount_cents: Math.round(amountUsd * 100) }),

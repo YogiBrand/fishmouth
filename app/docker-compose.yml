@@ -52,6 +52,20 @@ services:
       SERVICE_NAME: admin-api-8031
       TELEMETRY_URL: http://telemetry_gw_8030:8030
       ORCH_URL: http://orchestrator_8001:8001
+      ONBOARDING_URL: http://onboarding_8034:8034
+      # Health target overrides to match local service names
+      BACKEND_HEALTH_URL: http://orchestrator_8001:8001/health
+      VOICE_HEALTH_URL: http://telemetry_gw_8030:8030/health
+      TELEMETRY_HEALTH_URL: http://telemetry_gw_8030:8030/health
+      BILLING_HEALTH_URL: http://billing_gw_8032:8032/health
+      ORCH_HEALTH_URL: http://orchestrator_8001:8001/health
+      LEAD_HEALTH_URL: http://onboarding_8034:8034/health
+      ENRICH_HEALTH_URL: http://address_lookup_8022:8022/health
+      SCRAPER_HEALTH_URL: http://osint_contacts_8027:8027/health
+      IMAGE_HEALTH_URL: http://vision_ai_8024:8024/health
+      ML_HEALTH_URL: http://quality_engine_8026:8026/health
+      STREET_HEALTH_URL: http://mapping_intel_8025:8025/health
+      GEOCODER_HEALTH_URL: http://address_lookup_8022:8022/health
     depends_on:
       postgres:
         condition: service_healthy

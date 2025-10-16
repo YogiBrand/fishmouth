@@ -9,7 +9,7 @@ import {
   mockAnalyticsData,
 } from '../data/mockLeads';
 
-const ENABLE_MOCK_DATA = process.env.REACT_APP_ENABLE_MOCKS === 'true' || process.env.NODE_ENV !== 'production';
+const ENABLE_MOCK_DATA = process.env.REACT_APP_ENABLE_MOCKS === 'true';
 
 const assertMocksEnabled = (error) => {
   if (!ENABLE_MOCK_DATA) {
@@ -192,13 +192,24 @@ api.interceptors.request.use((config) => {
 api.interceptors.response.use(
   (response) => response,
   (error) => {
-    if (error.response?.status === 401) {
-      if (error.config?.fmAllowUnauthorized) {
+    const status = error.response?.status;
+    const cfg = error.config || {};
+    const url = (cfg.url || '').toString();
+    const isAuthProbe = cfg.fmAuthProbe === true || /\/auth\/(me|session|refresh|verify)/.test(url) || /\/api\/(me|session|profile)/.test(url);
+
+    if (status === 401) {
+      if (cfg.fmAllowUnauthorized) {
         return Promise.reject(error);
       }
-      localStorage.removeItem('token');
-      localStorage.removeItem('user');
-      if (window.location.pathname !== '/login') {
+      // Only auto-logout on explicit auth/session probes; otherwise bubble the error
+      if (!isAuthProbe) {
+        return Promise.reject(error);
+      }
+      try {
+        localStorage.removeItem('token');
+        localStorage.removeItem('user');
+      } catch {}
+      if (typeof window !== 'undefined' && window.location.pathname !== '/login') {
         window.location.href = '/login';
       }
     }
@@ -208,6 +219,12 @@ api.interceptors.response.use(
 
 // Lead Generation API
 export const leadAPI = {
+  // Trigger a roof scan for a single lead
+  scanLead: async (leadId) => {
+    // Use Admin API proxy route; backend infers user by lead id
+    const response = await api.post(`/admin/leads/${leadId}/scan`, {});
+    return response.data;
+  },
   // Area Scanning
   startAreaScan: async ({
     areaName,

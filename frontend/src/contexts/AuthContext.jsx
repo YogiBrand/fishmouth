@@ -19,12 +19,16 @@ export const AuthProvider = ({ children }) => {
   const API_URL = '';
 
   useEffect(() => {
-    // Check if user is logged in on mount
+    // Check if user is logged in on mount and validate token lazily
     const token = localStorage.getItem('token');
     const userData = localStorage.getItem('user');
-    
     if (token && userData) {
-      setUser(JSON.parse(userData));
+      try {
+        setUser(JSON.parse(userData));
+      } catch {
+        // Corrupt user data
+        localStorage.removeItem('user');
+      }
     }
     setLoading(false);
   }, []);
@@ -74,19 +78,32 @@ export const AuthProvider = ({ children }) => {
     }
   };
 
-  const signup = async (email, password, companyName, phone) => {
+  const signup = async (email, password, companyName, phone, extras = {}) => {
     try {
+      const payload = {
+        email,
+        password,
+        company_name: companyName,
+        phone,
+      };
+      if (extras && typeof extras === 'object') {
+        if (typeof extras.lat === 'number' && typeof extras.lon === 'number') {
+          payload.lat = extras.lat;
+          payload.lon = extras.lon;
+        }
+        if (typeof extras.radius_m === 'number') {
+          payload.radius_m = extras.radius_m;
+        }
+        if (typeof extras.sample === 'number') {
+          payload.sample = extras.sample;
+        }
+      }
       const response = await fetch(`${API_URL}/auth/signup`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({
-          email,
-          password,
-          company_name: companyName,
-          phone,
-        }),
+        body: JSON.stringify(payload),
       });
       
       const data = await response.json();
@@ -190,8 +207,10 @@ export const AuthProvider = ({ children }) => {
   };
 
   const logout = () => {
-    localStorage.removeItem('token');
-    localStorage.removeItem('user');
+    try {
+      localStorage.removeItem('token');
+      localStorage.removeItem('user');
+    } catch {}
     setUser(null);
   };
 

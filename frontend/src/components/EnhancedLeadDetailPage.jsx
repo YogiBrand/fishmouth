@@ -26,7 +26,7 @@ import { format } from 'date-fns';
 import VoiceTranscriptModal from './VoiceTranscriptModal';
 import LeadEmailModal from './LeadEmailModal';
 import EnhancedReportGenerator from './EnhancedReportGenerator';
-import { activityAPI, voiceAPI } from '../services/api';
+import { activityAPI, voiceAPI, leadAPI } from '../services/api';
 
 const asArray = (value) => {
   if (Array.isArray(value)) return value;
@@ -238,6 +238,7 @@ const EnhancedLeadDetailPage = ({ lead, onRewardPoints = () => {} }) => {
   const [activeEmailThread, setActiveEmailThread] = useState(null);
   const [showReportGenerator, setShowReportGenerator] = useState(false);
   const [businessProfile, setBusinessProfile] = useState(null);
+  const [scanLoading, setScanLoading] = useState(false);
 
   useEffect(() => {
     setSelectedImagery(imageryContext.imageryTiles?.[0] || null);
@@ -431,6 +432,24 @@ const EnhancedLeadDetailPage = ({ lead, onRewardPoints = () => {} }) => {
     onRewardPoints(8, 'Forwarded email', { type: 'email_forward', threadId: thread?.id, leadId: lead?.id });
   }, [homeownerName, onRewardPoints, lead?.id]);
 
+  const handlePerformRoofScan = useCallback(async () => {
+    if (!lead?.id) return;
+    try {
+      setScanLoading(true);
+      toast.loading('Starting roof scan…', { id: 'roof-scan' });
+      await leadAPI.scanLead(lead.id);
+      toast.success('Roof scan completed. Updating dossier…', { id: 'roof-scan' });
+      // Quick refresh to pull updated imagery/intelligence
+      setTimeout(() => {
+        window.location.reload();
+      }, 600);
+    } catch (error) {
+      toast.error('Roof scan failed, please try again later.', { id: 'roof-scan' });
+    } finally {
+      setScanLoading(false);
+    }
+  }, [lead?.id]);
+
   if (!lead) {
     return (
       <div className="bg-white dark:bg-slate-900/70 rounded-xl shadow-xl border border-gray-200 dark:border-slate-800 p-6">
@@ -585,6 +604,15 @@ const EnhancedLeadDetailPage = ({ lead, onRewardPoints = () => {} }) => {
               {statusLabel}
             </div>
             {confidenceBadge}
+            <button
+              type="button"
+              onClick={handlePerformRoofScan}
+              disabled={scanLoading}
+              className="inline-flex items-center gap-2 px-3 py-1.5 text-sm font-semibold rounded-lg bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-60"
+            >
+              <Sparkles className="w-4 h-4" />
+              {scanLoading ? 'Scanning…' : 'Perform Roof Scan'}
+            </button>
           </div>
     </div>
   </div>

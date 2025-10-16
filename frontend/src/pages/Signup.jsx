@@ -1,7 +1,7 @@
 /**
  * Signup Page - original Fish Mouth design with expanded provider sign-up
  */
-import React, { useCallback, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useSEO } from '../utils/seo';
 import { useNavigate, Link } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
@@ -12,6 +12,13 @@ import AppleAuthButton from '../components/AppleAuthButton';
 import GoogleLogo from '../assets/brand/google.svg';
 import AppleLogo from '../assets/brand/apple.svg';
 import MicrosoftLogo from '../assets/brand/microsoft.svg';
+
+const DEFAULT_GEO_LOCATION = { lat: 32.7767, lon: -96.797 };
+const GEO_CITY_COORDS = {
+  'Dallas,TX': DEFAULT_GEO_LOCATION,
+};
+const ONBOARDING_RADIUS_M = 5000;
+const ONBOARDING_SAMPLE_COUNT = 1000;
 
 const Signup = () => {
   // Prefill from chatbot data if available
@@ -38,6 +45,8 @@ const Signup = () => {
   const [loading, setLoading] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState('');
+  const [geoLocation, setGeoLocation] = useState(DEFAULT_GEO_LOCATION);
+  const [geoSource, setGeoSource] = useState('default');
   const [googleCtrl, setGoogleCtrl] = useState({
     open: null,
     isReady: false,
@@ -65,6 +74,50 @@ const Signup = () => {
     ogDescription: 'Get 25 free leads + 14-day access. AI that fills your calendar.',
     ogImage: 'https://fishmouth.io/og-signup.jpg',
   });
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const applyLocation = (lat, lon, source) => {
+      if (cancelled) return;
+      if (typeof lat !== 'number' || typeof lon !== 'number') return;
+      setGeoLocation({ lat, lon });
+      setGeoSource(source);
+    };
+
+    const fetchGeoIp = async () => {
+      try {
+        const res = await fetch('/api/v1/geoip');
+        if (!res.ok) return;
+        const data = await res.json();
+        const key = data.city && data.region ? `${data.city},${data.region}` : null;
+        if (key && GEO_CITY_COORDS[key]) {
+          const coords = GEO_CITY_COORDS[key];
+          applyLocation(coords.lat, coords.lon, 'geoip');
+        }
+      } catch (geoErr) {
+        console.debug('GeoIP lookup failed', geoErr);
+      }
+    };
+
+    const requestBrowserLocation = () => {
+      if (typeof navigator === 'undefined' || !navigator.geolocation) {
+        fetchGeoIp();
+        return;
+      }
+      navigator.geolocation.getCurrentPosition(
+        (position) => applyLocation(position.coords.latitude, position.coords.longitude, 'geolocation'),
+        () => fetchGeoIp(),
+        { enableHighAccuracy: false, timeout: 5000, maximumAge: 600000 }
+      );
+    };
+
+    requestBrowserLocation();
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const handleChange = (e) => {
     setFormData({
@@ -207,7 +260,19 @@ const Signup = () => {
     setLoading(true);
 
     try {
-      const result = await signup(formData.email, formData.password, formData.company_name, formData.phone);
+      const result = await signup(
+        formData.email,
+        formData.password,
+        formData.company_name,
+        formData.phone,
+        {
+          lat: typeof geoLocation?.lat === 'number' ? geoLocation.lat : undefined,
+          lon: typeof geoLocation?.lon === 'number' ? geoLocation.lon : undefined,
+          radius_m: ONBOARDING_RADIUS_M,
+          sample: ONBOARDING_SAMPLE_COUNT,
+          source: geoSource,
+        }
+      );
       if (result.success) {
         // Redirect to user dashboard after successful signup
         navigate('/dashboard');

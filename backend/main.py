@@ -10,6 +10,16 @@ import uuid
 # Add parent directory to path for shared imports
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+shared_candidates = [
+    os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "shared")),
+    os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "shared")),
+    "/shared",
+]
+for shared_path in shared_candidates:
+    if os.path.isdir(shared_path) and shared_path not in sys.path:
+        sys.path.insert(0, shared_path)
+        break
+
 import httpx
 import sentry_sdk
 import structlog
@@ -87,6 +97,7 @@ from app.api.v1.public_shares import (
 )
 from app.api.v1.shortlinks import router as shortlinks_router
 from app.api.v1.health import router as health_router
+from app.api.v1.assistant import router as assistant_router
 from app.api.v1.app_config import router as app_config_router
 from app.api.v1.activity_feed import router as activity_router
 from app.api.v1.sequences import (
@@ -186,6 +197,7 @@ app.include_router(geoip_router)
 app.include_router(geo_router)
 app.include_router(geo_guess_router)
 app.include_router(marketing_router)
+app.include_router(assistant_router)
 
 
 app.middleware("http")(request_id_middleware_factory("X-Request-ID"))
@@ -336,6 +348,13 @@ class UserCreate(BaseModel):
     password: str
     company_name: Optional[str] = None
     phone: Optional[str] = None
+    lat: Optional[float] = None
+    lon: Optional[float] = None
+    radius_m: Optional[int] = Field(default=5000, ge=100)
+    sample: Optional[int] = Field(default=1000, ge=1)
+
+    class Config:
+        extra = "ignore"
 
 class UserLogin(BaseModel):
     email: EmailStr
@@ -612,6 +631,69 @@ async def signup(user: UserCreate, db: Session = Depends(get_db)):
     db.add(new_user)
     db.commit()
     db.refresh(new_user)
+
+    user_uuid = uuid.uuid5(uuid.NAMESPACE_DNS, f"fishmouth-user-{new_user.id}")
+    analytics_credits = max(new_user.gift_credits_awarded or 0, (new_user.lead_credits or 0) * 10)
+    analytics_payload = {
+        "user_id": str(user_uuid),
+        "email": new_user.email,
+        "credits": analytics_credits,
+    }
+    try:
+        db.execute(
+            text(
+                """
+                INSERT INTO analytics.users (user_id, email, credits)
+                VALUES (:user_id, :email, :credits)
+                ON CONFLICT (user_id) DO UPDATE SET email = EXCLUDED.email
+                """
+            ),
+            analytics_payload,
+        )
+        db.commit()
+    except Exception as exc:
+        db.rollback()
+        logger.exception(
+            "analytics.user_seed_failed",
+            user_id=new_user.id,
+            analytics_user_id=str(user_uuid),
+            error=str(exc),
+        )
+
+    seed_lat = user.lat
+    seed_lon = user.lon
+    radius_m = user.radius_m or 5000
+    sample_size = user.sample or 1000
+    if seed_lat is not None and seed_lon is not None:
+        seed_payload = {
+            "user_id": str(user_uuid),
+            "lat": float(seed_lat),
+            "lon": float(seed_lon),
+            "radius_m": int(radius_m),
+            "sample": int(sample_size),
+        }
+        try:
+            async with httpx.AsyncClient(timeout=20.0) as client:
+                response = await client.post(
+                    "http://onboarding_8034:8034/onboarding/seed",
+                    json=seed_payload,
+                )
+            response.raise_for_status()
+        except (httpx.HTTPError, ValueError) as exc:
+            logger.exception(
+                "onboarding.seed_failed",
+                user_id=new_user.id,
+                analytics_user_id=str(user_uuid),
+                payload=seed_payload,
+                error=str(exc),
+            )
+    else:
+        logger.info(
+            "onboarding.seed_skipped",
+            user_id=new_user.id,
+            analytics_user_id=str(user_uuid),
+            reason="missing_coordinates",
+        )
     
     # Create token
     access_token_expires = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
@@ -631,6 +713,7 @@ async def signup(user: UserCreate, db: Session = Depends(get_db)):
             "gift_credits_awarded": new_user.gift_credits_awarded,
             "gift_leads_awarded": new_user.gift_leads_awarded,
             "gift_awarded_at": new_user.gift_awarded_at.isoformat() if new_user.gift_awarded_at else None,
+            "analytics_user_id": str(user_uuid),
         }
     }
 
@@ -647,11 +730,38 @@ async def login(user: UserLogin, db: Session = Depends(get_db)):
     if not db_user.is_active:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Inactive user"
-        )
+        detail="Inactive user"
+    )
     
     # Create token
     access_token_expires = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
+    user_uuid = uuid.uuid5(uuid.NAMESPACE_DNS, f"fishmouth-user-{db_user.id}")
+    analytics_credits = max(db_user.gift_credits_awarded or 0, (db_user.lead_credits or 0) * 10)
+    try:
+        db.execute(
+            text(
+                """
+                INSERT INTO analytics.users (user_id, email, credits)
+                VALUES (:user_id, :email, :credits)
+                ON CONFLICT (user_id) DO UPDATE SET email = EXCLUDED.email
+                """
+            ),
+            {
+                "user_id": str(user_uuid),
+                "email": db_user.email,
+                "credits": analytics_credits,
+            },
+        )
+        db.commit()
+    except Exception as exc:
+        db.rollback()
+        logger.exception(
+            "analytics.user_ensure_failed",
+            user_id=db_user.id,
+            analytics_user_id=str(user_uuid),
+            error=str(exc),
+        )
+
     access_token = create_access_token(
         data={"sub": db_user.email}, expires_delta=access_token_expires
     )
@@ -669,6 +779,7 @@ async def login(user: UserLogin, db: Session = Depends(get_db)):
             "gift_credits_awarded": db_user.gift_credits_awarded,
             "gift_leads_awarded": db_user.gift_leads_awarded,
             "gift_awarded_at": db_user.gift_awarded_at.isoformat() if db_user.gift_awarded_at else None,
+            "analytics_user_id": str(user_uuid),
         }
     }
 

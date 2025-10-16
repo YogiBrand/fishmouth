@@ -8,16 +8,14 @@ import AdminLogin from './pages/AdminLogin';
 import AdminDashboard from './pages/AdminDashboard';
 import Dashboard from './pages/Dashboard';
 import ScanResults from './pages/ScanResults';
-import ScanPage from './pages/ScanPage';
-import EnhancedLeadDetailPage from './components/EnhancedLeadDetailPage';
 import ComprehensiveBusinessSettings from './components/ComprehensiveBusinessSettings';
 import SmartOnboardingAssistant from './components/SmartOnboardingAssistant';
 import EnhancedReportsPage from './pages/EnhancedReportsPage';
 import ReportPage from './pages/ReportPage';
-import SharedReportPage from './pages/SharedReportPage';
 import ErrorBoundary from './components/ErrorBoundary';
 import CookieConsent from './components/CookieConsent';
-import AIChatbot from './components/AIChatbot';
+import { HelpAssistantProvider } from './components/HelpAssistant/HelpAssistantContext';
+import HelpAssistant from './components/HelpAssistant/HelpAssistant';
 import NotFound from './pages/NotFound';
 import Terms from './pages/Terms';
 import Privacy from './pages/Privacy';
@@ -39,28 +37,14 @@ import HeatClusterDetail from './pages/HeatClusterDetail';
 
 // Protected Route Component
 const ProtectedRoute = ({ children }) => {
-  const { user, loading } = useAuth();
-
-  if (loading) {
-    return <div className="min-h-screen flex items-center justify-center">
-      <div className="animate-spin rounded-full h-32 w-32 border-b-2 border-blue-600"></div>
-    </div>;
-  }
-
+  const { user } = useAuth();
   return user ? children : <Navigate to="/login" />;
 };
 
 // Admin Route Component
 const AdminRoute = ({ children }) => {
-  const { user, loading } = useAuth();
-
-  if (loading) {
-    return <div className="min-h-screen flex items-center justify-center">
-      <div className="animate-spin rounded-full h-32 w-32 border-b-2 border-blue-600"></div>
-    </div>;
-  }
-
-  return user && (user.role === 'admin' || user.role === 'superadmin') 
+  const { user } = useAuth();
+  return user?.is_admin
     ? children 
     : <Navigate to="/admin/login" />;
 };
@@ -70,6 +54,7 @@ function App() {
     <Router>
       <AuthProvider>
         <ErrorBoundary>
+        <HelpAssistantProvider>
         <Routes>
           {/* Public Routes */}
           <Route path="/" element={<MarketingHome />} />
@@ -125,36 +110,15 @@ function App() {
             }
           />
 
+          {/* Reports (Protected) */}
           <Route
-            path="/scan"
+            path="/reports/:reportId"
             element={
               <ProtectedRoute>
-                <ScanPage />
+                <ReportPage />
               </ProtectedRoute>
             }
           />
-
-          {/* Lead Detail Page (Protected) */}
-          <Route
-            path="/leads/:leadId"
-            element={
-              <ProtectedRoute>
-                <EnhancedLeadDetailPage />
-              </ProtectedRoute>
-            }
-          />
-
-          {/* Business Configuration (Protected) */}
-          <Route
-            path="/settings/business"
-            element={
-              <ProtectedRoute>
-                <ComprehensiveBusinessSettings />
-              </ProtectedRoute>
-            }
-          />
-
-          {/* Enhanced Reports Page (Protected) */}
           <Route
             path="/reports"
             element={
@@ -164,28 +128,15 @@ function App() {
             }
           />
 
-          {/* Enhanced Reports Page with Lead (Protected) */}
+          {/* Business Settings (Protected) */}
           <Route
-            path="/reports/:leadId"
+            path="/settings"
             element={
               <ProtectedRoute>
-                <EnhancedReportsPage />
+                <ComprehensiveBusinessSettings />
               </ProtectedRoute>
             }
           />
-
-          {/* Report View Page (Protected) */}
-          <Route
-            path="/reports/view/:reportId"
-            element={
-              <ProtectedRoute>
-                <ReportPage />
-              </ProtectedRoute>
-            }
-          />
-
-          {/* Shared Report View (Public) */}
-          <Route path="/reports/shared/:token" element={<SharedReportPage />} />
 
           {/* Smart Onboarding (Protected) */}
           <Route
@@ -211,7 +162,8 @@ function App() {
           <Route path="*" element={<NotFound />} />
         </Routes>
         <CookieConsent />
-        <AIChatbot />
+        <HelpAssistant />
+        </HelpAssistantProvider>
         </ErrorBoundary>
       </AuthProvider>
     </Router>

@@ -17,16 +17,7 @@ import Button from '../components/Button.jsx'
 import { AreaTrendChart, MultiLineChart } from '../components/TrendChart.jsx'
 import { LoadingState, ErrorState } from '../components/LoadingState.jsx'
 import { useToast } from '../components/ToastProvider.jsx'
-
-const API = import.meta.env.VITE_ADMIN_API
-
-const fetchJSON = async (path) => {
-  const res = await fetch(`${API}${path}`)
-  if (!res.ok) {
-    throw new Error(`Failed to load ${path}: ${res.status}`)
-  }
-  return res.json()
-}
+import { fetchJSON } from '../lib/api.js'
 
 const statusTone = (status) => {
   if (status === 'ok') return 'success'

@@ -29,6 +29,7 @@ import {
   ChevronDown,
   ClipboardCheck,
 } from 'lucide-react';
+import HelpIcon from '../components/Header/HelpIcon';
 import { useAuth } from '../contexts/AuthContext';
 import toast from 'react-hot-toast';
 import { useNavigate } from 'react-router-dom';
@@ -47,14 +48,12 @@ import EnhancedReportGenerator from '../components/EnhancedReportGenerator';
 import PointsLedgerModal from '../components/PointsLedgerModal';
 import WalletRewardsModal from '../components/WalletRewardsModal';
 import ManualReviewModal from '../components/ManualReviewModal';
-import DashboardKpiRow from '../components/DashboardKpiRow';
-import LeadQueueTabs from '../components/LeadQueueTabs';
 import WelcomeCelebration from '../components/WelcomeCelebration';
 import { leadAPI, walletAPI } from '../services/api';
 import businessProfileService from '../services/businessProfileService';
 import { getLeadUrgency, formatLeadAgeLabel, resolveLeadCreatedAt, getLeadAgeHours } from '../utils/leads';
-import { mockRecentScans, mockHeatClusters } from '../data/mockLeads';
 import ScannerActivityTable, { buildScannerRows } from '../components/ScannerActivityTable';
+import StarterLeadsPanel from '../components/StarterLeadsPanel';
 
 const LEVEL_THRESHOLDS = [0, 250, 650, 1200, 1900, 2800, 3900, 5200, 6700, 8400];
 const DAILY_POINTS_CAP = 750;
@@ -68,6 +67,7 @@ const CREDIT_PRICING = {
   email: { label: 'AI Email', cost: 0.09, apiCost: 0.0225, unit: 'email' },
   leads: { label: 'AI Hot Lead', cost: 45, apiCost: 12, unit: 'lead' },
 };
+const ONBOARDING_API_BASE = process.env.REACT_APP_ONBOARDING_API_BASE || 'http://localhost:8034';
 
 const DEFAULT_APP_CONFIG = {
   featureFlags: { reports: true, voice: true, scanner: true, roi: true },
@@ -382,6 +382,8 @@ const NOTIFICATION_VISUALS = {
 
 export default function Dashboard() {
   const { user, logout } = useAuth();
+  const analyticsUserId = user?.analytics_user_id || null;
+  const onboardingApiBase = ONBOARDING_API_BASE;
 
   const getStoredNumber = (key, fallback = 0) => {
     if (typeof window === 'undefined') return fallback;
@@ -428,7 +430,6 @@ export default function Dashboard() {
   const [selectedLead, setSelectedLead] = useState(null);
   const [stats, setStats] = useState(null);
   const [appConfig, setAppConfig] = useState(DEFAULT_APP_CONFIG);
-  const [kpiData, setKpiData] = useState({});
   const [leadQueue, setLeadQueue] = useState({});
   const [hotLeads, setHotLeads] = useState([]);
   const [leadList, setLeadList] = useState([]);
@@ -2077,234 +2078,17 @@ const notifications = useMemo(() => {
       await Promise.all([refreshStats(), refreshLeadList(), refreshActivity(), refreshScannerData()]);
     } catch (error) {
       console.error('Failed to refresh data:', error);
-      await loadMockData();
+      toast.error('Failed to refresh dashboard data. Try again shortly.');
+      setStats(null);
+      setLeadList([]);
+      setHotLeads([]);
+      setClusters([]);
+      setClusterSummaries([]);
+      setScanSummaries([]);
+      setActivity([]);
     } finally {
       setLoading(false);
     }
-  };
-
-  const loadMockData = async () => {
-    setStats({
-      total_leads: 1247,
-      ultra_hot_leads: 89,
-      appointments_booked: 156,
-      active_clusters: 23,
-      new_clusters: 7,
-      conversion_rate: 12.8,
-      leads_over_time: [
-        { date: '2024-01-01', leads: 45 },
-        { date: '2024-01-02', leads: 52 },
-        { date: '2024-01-03', leads: 48 },
-        { date: '2024-01-04', leads: 61 },
-        { date: '2024-01-05', leads: 55 },
-        { date: '2024-01-06', leads: 67 },
-        { date: '2024-01-07', leads: 72 }
-      ],
-      conversion_funnel: [
-        { stage: 'Captured', count: 1247 },
-        { stage: 'Qualified', count: 892 },
-        { stage: 'Contacted', count: 567 },
-        { stage: 'Appointments', count: 156 }
-      ]
-    });
-
-    setKpiData({
-      hot_leads_today: { label: 'Hot Leads (Today)', value: 9, period: '24h' },
-      warm_leads_today: { label: 'Warm Leads (Today)', value: 14, period: '24h' },
-      reports_sent_7d: { label: 'Reports Sent', value: 32, period: '7d' },
-      views_7d: { label: 'Report Views', value: 76, period: '7d' },
-      replies_7d: { label: 'Replies / Clicks', value: 21, period: '7d' },
-      appointments_7d: { label: 'Appointments', value: 11, period: '7d' },
-    });
-    setRoiSummary({
-      spend_last_30: 420,
-      pipeline_value: 128000,
-      closed_value: 38500,
-      roi_percent: 204,
-    });
-    setSummaryGeneratedAt(new Date().toISOString());
-
-    const now = new Date();
-    const sampleHotLeads = [
-      {
-        id: 1,
-        name: 'Sarah Johnson',
-        address: '123 Oak Street, Austin, TX 78704',
-        phone: '(555) 123-4567',
-        email: 'sarah.johnson@email.com',
-        score: 95,
-        lead_score: 95,
-        lead_source: 'Storm Activity',
-        damage_estimate: 15000,
-        last_contact: new Date(now.getTime() - 2 * 24 * 60 * 60 * 1000).toISOString(),
-        status: 'immediate',
-        damage_indicators: ['hail_damage', 'dark_streaks'],
-        image_quality_score: 84.5,
-        quality_validation_status: 'passed',
-        street_view_quality: {
-          angles_captured: 3,
-          average_quality: 0.88,
-          average_occlusion: 0.18,
-          headings: [45, 160, 245],
-        },
-      },
-      {
-        id: 2,
-        name: 'Mike Chen',
-        address: '456 Pine Avenue, Austin, TX 78705',
-        phone: '(555) 987-6543',
-        email: 'mike.chen@email.com',
-        score: 88,
-        lead_score: 88,
-        lead_source: 'Neighbor Activity',
-        damage_estimate: 22000,
-        last_contact: new Date(now.getTime() - 4 * 24 * 60 * 60 * 1000).toISOString(),
-        status: 'urgent',
-        damage_indicators: ['granule_loss', 'moss_growth'],
-        image_quality_score: 73.2,
-        quality_validation_status: 'review',
-        street_view_quality: {
-          angles_captured: 2,
-          average_quality: 0.81,
-          average_occlusion: 0.27,
-          headings: [15, 210],
-        },
-      },
-      {
-        id: 3,
-        name: 'Jennifer Williams',
-        address: '789 Maple Drive, Austin, TX 78706',
-        phone: '(555) 555-0123',
-        email: 'jennifer.williams@email.com',
-        score: 92,
-        lead_score: 92,
-        lead_source: 'Insurance Activity',
-        damage_estimate: 18500,
-        last_contact: new Date(now.getTime() - 24 * 60 * 60 * 1000).toISOString(),
-        status: 'immediate',
-        damage_indicators: ['missing_shingles', 'discoloration'],
-        image_quality_score: 90.1,
-        quality_validation_status: 'passed',
-        street_view_quality: {
-          angles_captured: 3,
-          average_quality: 0.9,
-          average_occlusion: 0.12,
-          headings: [90, 180, 330],
-        },
-      },
-    ];
-
-    setHotLeads(sampleHotLeads);
-    setLeadQueue({
-      hot: { label: 'HOT', leads: sampleHotLeads },
-      warm: {
-        label: 'WARM',
-        leads: sampleHotLeads.map((lead, index) => ({
-          ...lead,
-          id: `warm-${index}`,
-          lead_score: (lead.score || 80) - 12,
-          lead_score_numeric: (lead.score || 80) - 12,
-          priority: 'warm',
-        })),
-      },
-      followups: { label: 'Follow-ups', leads: sampleHotLeads.slice(0, 2) },
-      unreached: { label: 'Unreached', leads: [] },
-      dnc: { label: 'DNC', leads: [] },
-    });
-    setLeadList(
-      sampleHotLeads.map((item, index) => ({
-        id: item.id || index + 1,
-        address: item.address.split(',')[0],
-        city: item.address.split(',')[1]?.trim().split(' ')[0] || 'Austin',
-        state: item.address.split(',')[1]?.trim().split(' ')[1] || 'TX',
-        zip_code: item.address.split(',')[2]?.trim() || '78704',
-        lead_score: item.score,
-        priority: item.status === 'immediate' ? 'hot' : 'warm',
-        replacement_urgency: item.status,
-        damage_indicators: item.damage_indicators,
-        image_quality_score: item.image_quality_score,
-        quality_validation_status: item.quality_validation_status,
-        street_view_quality: item.street_view_quality,
-        homeowner_name: item.name,
-        homeowner_phone: item.phone,
-        homeowner_email: item.email,
-        roof_age_years: 19,
-        roof_condition_score: 62,
-        roof_material: 'Asphalt Shingles',
-        ai_analysis: {
-          summary: 'Detected hail impacts and discoloration on north slope.',
-        },
-      }))
-    );
-    setLeadLoading(false);
-    const fallbackClusters = mockHeatClusters.map((cluster) => ({
-      id: cluster.id,
-      city: cluster.city,
-      state: cluster.state,
-      permit_count: cluster.permit_count,
-      cluster_score: cluster.cluster_score,
-      cluster_status: cluster.cluster_status || cluster.status,
-      radius_miles: cluster.radius_miles,
-      date_range_start: cluster.last_activity_at,
-      date_range_end: cluster.last_activity_at,
-      metadata: {
-        hot_leads: cluster.lead_overlap,
-        likely_new_roofs: cluster.likely_new_roofs,
-      },
-    }));
-    setClusters(fallbackClusters);
-    setClusterSummaries(mockHeatClusters);
-    setScanSummaries(mockRecentScans);
-
-    setActivity([
-      {
-        id: 1,
-        type: 'lead_captured',
-        message: 'New lead captured: Sarah Johnson',
-        payload: {
-          lead_name: 'Sarah Johnson',
-          lead_id: sampleHotLeads[0]?.id,
-          timestamp: new Date(now.getTime() - 60 * 60 * 1000).toISOString(),
-        },
-        occurred_at: new Date(now.getTime() - 60 * 60 * 1000).toISOString(),
-      },
-      {
-        id: 2,
-        type: 'appointment_booked',
-        message: 'Appointment booked with Mike Chen',
-        payload: {
-          lead_name: 'Mike Chen',
-          lead_id: sampleHotLeads[1]?.id,
-          timestamp: new Date(now.getTime() - 2 * 60 * 60 * 1000).toISOString(),
-        },
-        occurred_at: new Date(now.getTime() - 2 * 60 * 60 * 1000).toISOString(),
-      },
-      {
-        id: 3,
-        type: 'report_ready',
-        message: 'Report generated for West Austin Cluster',
-        payload: {
-          lead_name: 'Cluster - West Austin',
-          lead_id: sampleHotLeads[0]?.id,
-          report_id: 'report-west-austin',
-          template: 'lead_dossier',
-          timestamp: new Date(now.getTime() - 3 * 60 * 60 * 1000).toISOString(),
-        },
-        occurred_at: new Date(now.getTime() - 3 * 60 * 60 * 1000).toISOString(),
-      },
-      {
-        id: 4,
-        type: 'ai_call_completed',
-        message: 'AI call completed with Jennifer Williams',
-        payload: {
-          lead_name: 'Jennifer Williams',
-          lead_id: sampleHotLeads[2]?.id,
-          call_id: 'call-jennifer',
-          timestamp: new Date(now.getTime() - 4 * 60 * 60 * 1000).toISOString(),
-        },
-        occurred_at: new Date(now.getTime() - 4 * 60 * 60 * 1000).toISOString(),
-      },
-    ]);
   };
 
   const scannerRows = useMemo(
@@ -2350,13 +2134,12 @@ const notifications = useMemo(() => {
     }
   };
 
-  const applyDashboardSummary = (data) => {
+  const applyDashboardSummary = useCallback((data) => {
     if (!data || typeof data !== 'object') return;
     const metricsPayload = data.metrics || data;
     if (metricsPayload) {
       setStats(metricsPayload);
     }
-    setKpiData(data.kpis || {});
     setLeadQueue(data.lead_queue || {});
     const hotBucket = data.lead_queue?.hot;
     if (Array.isArray(hotBucket)) {
@@ -2371,9 +2154,9 @@ const notifications = useMemo(() => {
     }
     setRoiSummary(data.roi || null);
     setSummaryGeneratedAt(data.generated_at || null);
-  };
+  }, []);
 
-  const refreshStats = async () => {
+  const refreshStats = useCallback(async () => {
     try {
       const token = localStorage.getItem('token');
       const res = await fetch('/api/v1/dashboard/summary?lead_limit=25', {
@@ -2389,13 +2172,13 @@ const notifications = useMemo(() => {
       console.error('Failed to fetch dashboard summary:', error);
       throw error;
     }
-  };
+  }, [applyDashboardSummary]);
 
-  const refreshHotLeads = async () => {
+  const refreshHotLeads = useCallback(async () => {
     await refreshStats();
-  };
+  }, [refreshStats]);
 
-  const refreshLeadList = async () => {
+  const refreshLeadList = useCallback(async () => {
     try {
       setLeadLoading(true);
       const data = await leadAPI.getLeads({ limit: 150 });
@@ -2412,9 +2195,9 @@ const notifications = useMemo(() => {
     } finally {
       setLeadLoading(false);
     }
-  };
+  }, []);
 
-  const refreshActivity = async () => {
+  const refreshActivity = useCallback(async () => {
     try {
       const token = localStorage.getItem('token');
       const res = await fetch('/api/v1/activity?limit=20', {
@@ -2429,7 +2212,7 @@ const notifications = useMemo(() => {
       console.error('Failed to fetch activity:', error);
       throw error;
     }
-  };
+  }, []);
 
   const handleManualLeadCreated = useCallback(
     async (response) => {
@@ -3244,12 +3027,14 @@ const notifications = useMemo(() => {
               id: `${nextTierData.id}-locked`,
               title: `${nextTierData.label} (Locked)`,
               description: nextTierData.description,
-              tasks: nextTierData.tasks.map((task) => ({
+              // Show only a teaser of 2 locked tasks to create anticipation
+              tasks: nextTierData.tasks.slice(0, 2).map((task) => ({
                 ...task,
                 completed: false,
                 locked: true,
                 requiresEvent: true,
-                actionLabel: task.cta || 'Locked',
+                cta: undefined,
+                actionLabel: 'Locked',
               })),
             }
           : null;
@@ -3263,8 +3048,12 @@ const notifications = useMemo(() => {
           },
           progressionSection,
         ];
+        // Show a compact locked teaser panel for "gamified" feel
         if (lockedSection) {
-          questSections.push(lockedSection);
+          questSections.push({
+            ...lockedSection,
+            title: `${nextTierData.label} • Locked`,
+          });
         }
 
         const urgencyWeights = { critical: 0, high: 1, medium: 2, normal: 3, unknown: 4 };
@@ -3400,6 +3189,24 @@ const notifications = useMemo(() => {
               />
             </div>
 
+            <div className={`${surfaceClass(isDark)} p-6 space-y-4`}>
+              <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
+                <div>
+                  <h3 className={`text-lg font-semibold ${headingClass}`}>Starter Leads</h3>
+                  <p className={`text-sm ${mutedClass}`}>
+                    Auto-seeded prospects near your service area. Redeem LOCKED leads with credits.
+                  </p>
+                </div>
+              </div>
+              {analyticsUserId ? (
+                <StarterLeadsPanel apiBase={onboardingApiBase} userId={analyticsUserId} />
+              ) : (
+                <p className={`text-sm ${mutedClass}`}>
+                  Starter leads will appear after onboarding sync completes for your account.
+                </p>
+              )}
+            </div>
+
             {heroEntries.length > 0 && (
               <DashboardLeadMap
                 leadEntries={heroEntries}
@@ -3426,7 +3233,7 @@ const notifications = useMemo(() => {
               />
             )}
 
-            {/* Gamified progress */}
+            {/* Key metrics row */}
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
               <div className={`${surfaceClass(isDark)} p-6 space-y-3`}>
                 <h3 className={`text-sm font-semibold ${headingClass} uppercase tracking-wide`}>Growth Quest</h3>
@@ -3440,19 +3247,6 @@ const notifications = useMemo(() => {
                 <div className={`text-xs ${mutedClass}`}>{growthProgress}% complete • {totalLeads.toLocaleString()} leads tracked</div>
               </div>
               <div className={`${surfaceClass(isDark)} p-6 space-y-3`}>
-                <h3 className={`text-sm font-semibold ${headingClass} uppercase tracking-wide`}>Call Team Streak</h3>
-                <p className={`text-sm ${mutedClass}`}>AI agent closed {aiVictories} interest-driven calls today. Keep the streak alive!</p>
-                <div className="flex gap-2">
-                  {Array.from({ length: 5 }).map((_, idx) => (
-                    <span
-                      key={`win-${idx}`}
-                      className={`flex-1 h-2 rounded-full ${idx < aiVictories ? 'bg-emerald-500' : 'bg-gray-200 dark:bg-slate-800'}`}
-                    ></span>
-                  ))}
-                </div>
-                <div className={`text-xs ${mutedClass}`}>Goal: 5 wins/day • {aiVictories >= 5 ? 'Quest complete!' : `${5 - aiVictories} calls to go`}</div>
-              </div>
-              <div className={`${surfaceClass(isDark)} p-6 space-y-3`}>
                 <h3 className={`text-sm font-semibold ${headingClass} uppercase tracking-wide`}>Quality Guardrail</h3>
                 <p className={`text-sm ${mutedClass}`}>Leads flagged for manual review: {followUpsDue}. Maintain under 10 to stay in the green.</p>
                 <div className="flex items-center gap-2 text-xs">
@@ -3461,72 +3255,8 @@ const notifications = useMemo(() => {
                   </span>
                   <span className={mutedClass}>Conversion rate {conversionRate.toFixed(1)}%</span>
                 </div>
-              <div className={`text-xs ${mutedClass}`}>Tip: tighten image validation to reduce reviews.</div>
+                <div className={`text-xs ${mutedClass}`}>Tip: tighten image validation to reduce reviews.</div>
               </div>
-            </div>
-
-            {/* Roofer Operations */}
-            <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
-              <div className={`${surfaceClass(isDark)} p-6 space-y-4`}>
-                <div className="flex items-center justify-between">
-                  <h3 className={`text-sm font-semibold uppercase tracking-wide ${headingClass}`}>Field Ops Readiness</h3>
-                  <span className={`text-xs font-semibold ${mutedClass}`}>Today</span>
-                </div>
-                <div className="grid grid-cols-2 gap-4 text-sm">
-                  <div>
-                    <p className={`text-xs ${mutedClass}`}>Crews rolling</p>
-                    <p className={`text-xl font-semibold ${headingClass}`}>{appointmentsBooked.toLocaleString()}</p>
-                  </div>
-                  <div>
-                    <p className={`text-xs ${mutedClass}`}>Hot roofs queued</p>
-                    <p className={`text-xl font-semibold ${headingClass}`}>{(hotLeads?.length ?? 0).toLocaleString()}</p>
-                  </div>
-                </div>
-                <ul className={`text-xs space-y-1 ${mutedClass}`}>
-                  <li>• {activeClusters} storm clusters still waiting on crew coverage</li>
-                  <li>• {followUpsDue} dossiers flagged for manual QA this morning</li>
-                </ul>
-                <div className={`text-xs ${isDark ? 'text-emerald-300' : 'text-emerald-600'}`}>
-                  Tip: reserve two flex slots for AI callbacks that flip to onsite after 5pm.
-                </div>
-              </div>
-
-              <div className={`${surfaceClass(isDark)} p-6 space-y-4`}>
-                <div className="flex items-center justify-between">
-                  <h3 className={`text-sm font-semibold uppercase tracking-wide ${headingClass}`}>Revenue Pulse</h3>
-                  <span className={`text-xs font-semibold ${mutedClass}`}>This month</span>
-                </div>
-                <div className="grid grid-cols-2 gap-4 text-sm">
-                  <div>
-                    <p className={`text-xs ${mutedClass}`}>Booked revenue</p>
-                    <p className={`text-xl font-semibold ${headingClass}`}>{currencyFormatter.format(monthlyRevenue)}</p>
-                  </div>
-                  <div>
-                    <p className={`text-xs ${mutedClass}`}>Pipeline value</p>
-                    <p className={`text-xl font-semibold ${headingClass}`}>{currencyFormatter.format(pipelineValue)}</p>
-                  </div>
-                </div>
-                <div className="space-y-2 text-xs">
-                  <div className="flex items-center justify-between">
-                    <span className={mutedClass}>Avg deal</span>
-                    <span className={headingClass}>{currencyFormatter.format(avgDealSize || 0)}</span>
-                  </div>
-                  <div className="flex items-center justify-between">
-                    <span className={mutedClass}>Cost / lead</span>
-                    <span className={headingClass}>
-                      {costPerLead ? `$${Number(costPerLead).toFixed(2)}` : '—'}
-                    </span>
-                  </div>
-                  <div className="flex items-center justify-between">
-                    <span className={mutedClass}>Connect rate</span>
-                    <span className={headingClass}>{connectRate ? `${connectRate.toFixed(1)}%` : '—'}</span>
-                  </div>
-                </div>
-                <div className={`text-xs ${mutedClass}`}>
-                  Keep nurture flows warm—{activeCampaigns} automation campaigns are live right now.
-                </div>
-              </div>
-
               <div className={`${surfaceClass(isDark)} p-6 space-y-4`}>
                 <div className="flex items-center justify-between">
                   <h3 className={`text-sm font-semibold uppercase tracking-wide ${headingClass}`}>Alerts & Follow-ups</h3>
@@ -3557,6 +3287,8 @@ const notifications = useMemo(() => {
                 </div>
               </div>
             </div>
+
+            
 
             <section className={`${surfaceClass(isDark)} p-6 space-y-5`}>
               <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-3">
@@ -3599,6 +3331,12 @@ const notifications = useMemo(() => {
                 Tip: log every touch in the lead dossier. Crews can justify spend, and estimators know who to call first.
               </p>
             </section>
+
+            {/* Charts under Lead cost analysis */}
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+              <ChartCard title="Leads Over Time" subtitle="Daily inbound volume" type="line" data={stats?.leads_over_time || []} isDark={isDark} />
+              <ChartCard title="Conversion Funnel" subtitle="Captured → Qualified → Appointments" type="bar" data={stats?.conversion_funnel || []} isDark={isDark} />
+            </div>
 
             <DashboardQuestPanel
               sections={questSections}
@@ -3681,20 +3419,7 @@ const notifications = useMemo(() => {
               </div>
             </div>
 
-            {/* Charts */}
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-              <ChartCard title="Leads Over Time" subtitle="Daily inbound volume" type="line" data={stats?.leads_over_time || []} isDark={isDark} />
-              <ChartCard title="Conversion Funnel" subtitle="Captured → Qualified → Appointments" type="bar" data={stats?.conversion_funnel || []} isDark={isDark} />
-              <div className={`${surfaceClass(isDark)} p-6 space-y-4 lg:col-span-2`}>
-                <h3 className={`text-sm font-semibold ${headingClass} uppercase tracking-wide`}>Automation & engagement</h3>
-                <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
-                  <StatusPill label="Total leads" value={analyticsSnapshot.totalLeads.toLocaleString()} isDark={isDark} />
-                  <StatusPill label="Hot leads" value={analyticsSnapshot.hotLeadCount.toLocaleString()} color="red" isDark={isDark} />
-                  <StatusPill label="AI call wins" value={analyticsSnapshot.voiceWins.toLocaleString()} color="emerald" isDark={isDark} />
-                  <StatusPill label="Email sends" value={analyticsSnapshot.emails.toLocaleString()} color="blue" isDark={isDark} />
-                </div>
-              </div>
-            </div>
+            {/* Charts moved under Lead cost analysis below */}
           </div>
         );
       
@@ -4693,6 +4418,7 @@ const notifications = useMemo(() => {
                   </div>
                 )}
               </div>
+              <HelpIcon />
               <div ref={notificationTrayRef} className="relative flex-shrink-0">
                 <button
                   type="button"

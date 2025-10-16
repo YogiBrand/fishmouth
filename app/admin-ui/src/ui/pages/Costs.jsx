@@ -8,17 +8,7 @@ import { AreaTrendChart } from '../components/TrendChart.jsx'
 import { LoadingState, ErrorState } from '../components/LoadingState.jsx'
 import Badge from '../components/Badge.jsx'
 import { useToast } from '../components/ToastProvider.jsx'
-
-const API = import.meta.env.VITE_ADMIN_API
-
-const fetchJSON = async (path) => {
-  const res = await fetch(`${API}${path}`)
-  if (!res.ok) {
-    const body = await res.text()
-    throw new Error(body || `Request failed with ${res.status}`)
-  }
-  return res.json()
-}
+import { fetchJSON } from '../lib/api.js'
 
 const formatCurrency = (value) =>
   value.toLocaleString(undefined, { style: 'currency', currency: 'USD', maximumFractionDigits: 2 })

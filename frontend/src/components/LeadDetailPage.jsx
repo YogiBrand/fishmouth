@@ -27,6 +27,8 @@ const LeadDetailPage = () => {
   const [activeTab, setActiveTab] = useState('overview');
   const [showSequenceModal, setShowSequenceModal] = useState(false);
   const [showCallModal, setShowCallModal] = useState(false);
+  const [scanLoading, setScanLoading] = useState(false);
+  const [showOverlay, setShowOverlay] = useState(true);
 
   const fetchEnrollmentState = async () => {
     try {
@@ -164,6 +166,21 @@ const LeadDetailPage = () => {
       setBusinessConfig(mockConfig);
     } catch (error) {
       console.error('Error loading business config:', error);
+    }
+  };
+
+  const handlePerformRoofScan = async () => {
+    try {
+      setScanLoading(true);
+      toast.loading('Queuing roof scan…', { id: 'lead-scan' });
+      await leadAPI.scanLead(leadId);
+      toast.success('Roof scan started. Updating dossier…', { id: 'lead-scan' });
+      await loadLeadData();
+    } catch (error) {
+      console.error('Roof scan failed', error);
+      toast.error('Roof scan failed. Please try again in a moment.', { id: 'lead-scan' });
+    } finally {
+      setScanLoading(false);
     }
   };
 
@@ -537,6 +554,14 @@ const LeadDetailPage = () => {
             <span className={`px-3 py-1 rounded-full text-sm font-medium ${getStatusColor(lead.status)}`}>
               {lead.status?.replace('_', ' ').toUpperCase()}
             </span>
+            <button
+              onClick={handlePerformRoofScan}
+              disabled={scanLoading}
+              className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 flex items-center space-x-2 disabled:opacity-60"
+            >
+              <Zap className="h-4 w-4" />
+              <span>{scanLoading ? 'Scanning…' : 'Perform Roof Scan'}</span>
+            </button>
             <button
               onClick={() => setShowSequenceModal(true)}
               className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 flex items-center space-x-2"

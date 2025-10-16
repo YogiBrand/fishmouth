@@ -51,6 +51,11 @@ services:
       TWILIO_ACCOUNT_SID: ${TWILIO_ACCOUNT_SID:-}
       TWILIO_AUTH_TOKEN: ${TWILIO_AUTH_TOKEN:-}
       TWILIO_PHONE_NUMBER: ${TWILIO_PHONE_NUMBER:-}
+      ASSISTANT_ENABLED: "true"
+      ASSISTANT_MAX_TOKENS: ${ASSISTANT_MAX_TOKENS:-256}
+      VLLM_BASE_URL: ${VLLM_BASE_URL:-http://vllm:8006/v1}
+      ASSISTANT_MODEL: ${ASSISTANT_MODEL:-Qwen2.5-7B-Instruct}
+      PYTHONPATH: /app:/shared
     ports:
       - "8000:8000"
     depends_on:
@@ -60,6 +65,7 @@ services:
         condition: service_healthy
     volumes:
       - ./backend:/app
+      - ./shared:/shared
     command: uvicorn main:app --host 0.0.0.0 --port 8000 --reload
     healthcheck:
       test:
@@ -87,11 +93,13 @@ services:
       TWILIO_ACCOUNT_SID: ${TWILIO_ACCOUNT_SID:-}
       TWILIO_AUTH_TOKEN: ${TWILIO_AUTH_TOKEN:-}
       TWILIO_PHONE_NUMBER: ${TWILIO_PHONE_NUMBER:-}
+      PYTHONPATH: /app:/shared
     depends_on:
       - postgres
       - redis
     volumes:
       - ./backend:/app
+      - ./shared:/shared
     command: celery -A celery_app worker --loglevel=info
 
   voice_server:
@@ -110,6 +118,7 @@ services:
       LOG_JSON: "true"
       SERVICE_VERSION: ${SERVICE_VERSION:-dev}
       OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT:-}
+      PYTHONPATH: /app:/shared
     ports:
       - "8001:8001"
     depends_on:
@@ -117,6 +126,7 @@ services:
       - redis
     volumes:
       - ./backend:/app
+      - ./shared:/shared
     command: uvicorn voice_server:app --host 0.0.0.0 --port 8001 --reload
     healthcheck:
       test:
@@ -322,6 +332,32 @@ services:
       timeout: 5s
       retries: 3
       start_period: 20s
+
+  # vLLM OpenAI-compatible GPU server
+  vllm:
+    image: vllm/vllm-openai:latest
+    container_name: fishmouth_vllm
+    command: >
+      python -m vllm.entrypoints.openai.api_server \
+      --model Qwen/Qwen2.5-7B-Instruct \
+      --dtype float16 \
+      --tensor-parallel-size 2 \
+      --max-model-len 4096 \
+      --gpu-memory-utilization 0.90 \
+      --port 8006
+    environment:
+      - HF_TOKEN=${HF_TOKEN}
+    # Optional: mount local models if pre-downloaded
+    # volumes:
+    #   - /opt/fishmouth-models:/models:ro
+    gpus: all
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - capabilities: [gpu]
+    networks:
+      - default
 
   # Community Street Imagery Service (FREE-FIRST)
   street-imagery:

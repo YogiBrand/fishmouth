@@ -382,9 +382,31 @@ class DashboardService:
                     """
                     SELECT
                         COUNT(*) AS total_leads,
+                        COUNT(*) FILTER (WHERE created_at >= NOW() - INTERVAL '7 days') AS leads_last_7d,
+                        COUNT(*) FILTER (
+                            WHERE created_at >= NOW() - INTERVAL '14 days'
+                              AND created_at < NOW() - INTERVAL '7 days'
+                        ) AS leads_prev_7d,
                         COUNT(*) FILTER (WHERE lead_score >= 90) AS ultra_hot_leads,
+                        COUNT(*) FILTER (
+                            WHERE lead_score >= 90
+                              AND created_at >= NOW() - INTERVAL '7 days'
+                        ) AS ultra_hot_last_7d,
+                        COUNT(*) FILTER (
+                            WHERE lead_score >= 90
+                              AND created_at >= NOW() - INTERVAL '14 days'
+                              AND created_at < NOW() - INTERVAL '7 days'
+                        ) AS ultra_hot_prev_7d,
                         COUNT(*) FILTER (WHERE status = 'appointment_scheduled') AS appointments_booked,
-                        COUNT(*) FILTER (WHERE created_at >= NOW() - INTERVAL '7 days') AS new_leads_last_week
+                        COUNT(*) FILTER (
+                            WHERE status = 'appointment_scheduled'
+                              AND updated_at >= NOW() - INTERVAL '7 days'
+                        ) AS appointments_last_7d,
+                        COUNT(*) FILTER (
+                            WHERE status = 'appointment_scheduled'
+                              AND updated_at >= NOW() - INTERVAL '14 days'
+                              AND updated_at < NOW() - INTERVAL '7 days'
+                        ) AS appointments_prev_7d
                     FROM leads
                     """
                 )
@@ -410,6 +432,12 @@ class DashboardService:
             ) or 0
             appointments = int(snapshot.get("appointments_booked") or 0)
             total_leads = int(snapshot.get("total_leads") or 0)
+            leads_last_7d = int(snapshot.get("leads_last_7d") or 0)
+            leads_prev_7d = int(snapshot.get("leads_prev_7d") or 0)
+            ultra_hot_last_7d = int(snapshot.get("ultra_hot_last_7d") or 0)
+            ultra_hot_prev_7d = int(snapshot.get("ultra_hot_prev_7d") or 0)
+            appointments_last_7d = int(snapshot.get("appointments_last_7d") or 0)
+            appointments_prev_7d = int(snapshot.get("appointments_prev_7d") or 0)
 
             conversion_funnel = [
                 {"stage": "Captured", "count": total_leads},
@@ -417,6 +445,8 @@ class DashboardService:
                 {"stage": "Appointments", "count": appointments},
             ]
             conversion_rate = round((appointments / total_leads) * 100, 1) if total_leads else 0.0
+            conversion_rate_last_7d = round((appointments_last_7d / leads_last_7d) * 100, 1) if leads_last_7d else 0.0
+            conversion_rate_prev_7d = round((appointments_prev_7d / leads_prev_7d) * 100, 1) if leads_prev_7d else 0.0
 
             clusters = await DashboardService.fetch_active_clusters(limit=25)
             active_clusters = len(clusters)
@@ -430,9 +460,17 @@ class DashboardService:
 
             return {
                 "total_leads": total_leads,
+                "leads_last_7d": leads_last_7d,
+                "leads_prev_7d": leads_prev_7d,
                 "ultra_hot_leads": int(snapshot.get("ultra_hot_leads") or 0),
+                "ultra_hot_last_7d": ultra_hot_last_7d,
+                "ultra_hot_prev_7d": ultra_hot_prev_7d,
                 "appointments_booked": appointments,
+                "appointments_last_7d": appointments_last_7d,
+                "appointments_prev_7d": appointments_prev_7d,
                 "conversion_rate": conversion_rate,
+                "conversion_rate_last_7d": conversion_rate_last_7d,
+                "conversion_rate_prev_7d": conversion_rate_prev_7d,
                 "active_clusters": active_clusters,
                 "new_clusters": new_clusters,
                 "leads_over_time": leads_over_time,
