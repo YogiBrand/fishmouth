@@ -9,6 +9,7 @@ export default function LeadMap({ initialCenter=[-96, 37.8], initialZoom=4, onPo
   const mapRef = useRef(null);
   const containerRef = useRef(null);
   const leadsSourceId = 'lead-points';
+  const isDark = typeof document !== 'undefined' && document.documentElement.classList.contains('dark');
 
   useEffect(()=>{
     // Mapbox GL Draw expects a global mapboxgl namespace; provide maplibre for compatibility.
@@ -33,6 +34,8 @@ export default function LeadMap({ initialCenter=[-96, 37.8], initialZoom=4, onPo
           }
         },
         layers: [
+          // Ensure a dark-friendly background instead of default white
+          { id: 'background', type: 'background', paint: { 'background-color': isDark ? '#0f172a' : '#ffffff' } },
           { id: 'basemap', type: 'raster', source: 'raster-tiles' }
         ]
       },
@@ -131,5 +134,5 @@ export default function LeadMap({ initialCenter=[-96, 37.8], initialZoom=4, onPo
     };
   }, [initialCenter, initialZoom, onPolygon]);
 
-  return <div className="w-full h-[70vh] rounded border" ref={containerRef} />;
+  return <div className="w-full h-[70vh] rounded border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900/70" ref={containerRef} />;
 }

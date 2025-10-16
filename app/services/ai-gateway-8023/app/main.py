@@ -1,9 +1,12 @@
 from fastapi import FastAPI, HTTPException, Header, Request
 from pydantic import BaseModel
 from typing import List, Dict, Optional
-import os, time, asyncio, httpx
+import os, time, httpx
+
+from services.shared.telemetry_middleware import TelemetryMW
 
 app = FastAPI(title="AI Gateway (8023) — quotas+budget", version="0.2.0")
+app.add_middleware(TelemetryMW)
 
 OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY","")
 TELEMETRY_URL = os.getenv("TELEMETRY_URL","http://localhost:8030")
@@ -18,26 +21,6 @@ _min_calls = 0
 _min_tokens = 0
 _day_key = time.strftime("%Y-%m-%d")
 _day_cost = 0.0
-
-@app.middleware("http")
-async def telemetry_middleware(request: Request, call_next):
-    start = time.time()
-    user_id = request.headers.get("x-user-id") or request.headers.get("X-User-Id") or "anon"
-    try:
-        response = await call_next(request)
-    except Exception:
-        duration_ms = (time.time() - start) * 1000.0
-        asyncio.create_task(_emit_usage(
-            request.url.path, "http_request", 1, "request",
-            {"status": 500, "duration_ms": duration_ms, "method": request.method, "user": user_id}
-        ))
-        raise
-    duration_ms = (time.time() - start) * 1000.0
-    asyncio.create_task(_emit_usage(
-        request.url.path, "http_request", 1, "request",
-        {"status": response.status_code, "duration_ms": duration_ms, "method": request.method, "user": user_id}
-    ))
-    return response
 
 class ChatRequest(BaseModel):
     model: str = "meta-llama/llama-3.1-8b-instruct:free"

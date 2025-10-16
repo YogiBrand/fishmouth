@@ -1,10 +1,23 @@
 # docker-compose.additions.yml (overlay for domain services)
 services:
+  orchestrator_8001:
+    build:
+      context: ..
+      dockerfile: app/services/orchestrator-8001/Dockerfile
+    environment:
+      SERVICE_NAME: orchestrator-8001
+      TELEMETRY_URL: http://telemetry_gw_8030:8030
+    depends_on:
+      telemetry_gw_8030:
+        condition: service_started
+
   address_lookup_8022:
     build:
-      context: ./services/address-8022
+      context: ..
+      dockerfile: app/services/address-8022/Dockerfile
     environment:
-      TELEMETRY_URL: ${TELEMETRY_URL}
+      SERVICE_NAME: address-8022
+      TELEMETRY_URL: http://telemetry_gw_8030:8030
       MAPILLARY_TOKEN: ${MAPILLARY_TOKEN:-}
       ORS_API_KEY: ${ORS_API_KEY:-}
     depends_on:
@@ -14,10 +27,12 @@ services:
 
   ai_gateway_8023:
     build:
-      context: ./services/ai-gateway-8023
+      context: ..
+      dockerfile: app/services/ai-gateway-8023/Dockerfile
     environment:
+      SERVICE_NAME: ai-gateway-8023
       OPENROUTER_API_KEY: ${OPENROUTER_API_KEY}
-      TELEMETRY_URL: ${TELEMETRY_URL}
+      TELEMETRY_URL: http://telemetry_gw_8030:8030
       AI_MAX_RPM: ${AI_MAX_RPM}
       AI_MAX_TOKENS_PER_MIN: ${AI_MAX_TOKENS_PER_MIN}
       AI_BUDGET_USD_DAILY: ${AI_BUDGET_USD_DAILY}
@@ -29,9 +44,11 @@ services:
 
   vision_ai_8024:
     build:
-      context: ./services/vision-8024
+      context: ..
+      dockerfile: app/services/vision-8024/Dockerfile
     environment:
-      TELEMETRY_URL: ${TELEMETRY_URL}
+      SERVICE_NAME: vision-8024
+      TELEMETRY_URL: http://telemetry_gw_8030:8030
     depends_on:
       telemetry_gw_8030:
         condition: service_started
@@ -39,9 +56,11 @@ services:
 
   mapping_intel_8025:
     build:
-      context: ./services/mapping-8025
+      context: ..
+      dockerfile: app/services/mapping-8025/Dockerfile
     environment:
-      TELEMETRY_URL: ${TELEMETRY_URL}
+      SERVICE_NAME: mapping-8025
+      TELEMETRY_URL: http://telemetry_gw_8030:8030
       NOMINATIM_EMAIL: ${NOMINATIM_EMAIL}
       USGS_USER_AGENT: ${USGS_USER_AGENT}
     depends_on:
@@ -51,9 +70,11 @@ services:
 
   quality_engine_8026:
     build:
-      context: ./services/quality-8026
+      context: ..
+      dockerfile: app/services/quality-8026/Dockerfile
     environment:
-      TELEMETRY_URL: ${TELEMETRY_URL}
+      SERVICE_NAME: quality-8026
+      TELEMETRY_URL: http://telemetry_gw_8030:8030
     depends_on:
       telemetry_gw_8030:
         condition: service_started
@@ -61,9 +82,11 @@ services:
 
   osint_contacts_8027:
     build:
-      context: ./services/osint-8027
+      context: ..
+      dockerfile: app/services/osint-8027/Dockerfile
     environment:
-      TELEMETRY_URL: ${TELEMETRY_URL}
+      SERVICE_NAME: osint-8027
+      TELEMETRY_URL: http://telemetry_gw_8030:8030
     depends_on:
       telemetry_gw_8030:
         condition: service_started
@@ -71,9 +94,11 @@ services:
 
   event_monitor_8028:
     build:
-      context: ./services/events-8028
+      context: ..
+      dockerfile: app/services/events-8028/Dockerfile
     environment:
-      TELEMETRY_URL: ${TELEMETRY_URL}
+      SERVICE_NAME: events-8028
+      TELEMETRY_URL: http://telemetry_gw_8030:8030
     depends_on:
       telemetry_gw_8030:
         condition: service_started

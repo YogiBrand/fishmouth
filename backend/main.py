@@ -10,6 +10,7 @@ import uuid
 # Add parent directory to path for shared imports
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+import httpx
 import sentry_sdk
 import structlog
 from fastapi import FastAPI, Depends, HTTPException, Request, WebSocket, WebSocketDisconnect, status, UploadFile, File, Query
@@ -271,6 +272,17 @@ if settings.instrumentation.enable_prometheus:
 @app.on_event("startup")
 async def on_startup() -> None:
     logger.info("app.startup", environment=settings.environment)
+    if not settings.pii_encryption_key:
+        logger.warning("security.pii_encryption_key_missing")
+    if settings.environment.lower() == "production":
+        insecure_flags = {
+            "use_mock_imagery": settings.feature_flags.use_mock_imagery,
+            "use_mock_property_enrichment": settings.feature_flags.use_mock_property_enrichment,
+            "use_mock_contact_enrichment": settings.feature_flags.use_mock_contact_enrichment,
+        }
+        for flag, enabled in insecure_flags.items():
+            if enabled:
+                logger.warning("security.mock_flag_enabled", flag=flag)
 
 
 @app.websocket("/ws/scans/{scan_id}")
@@ -2397,6 +2409,7 @@ async def create_billing_stripe_session(
     session = SessionLocal()
     promotion_record: Optional[WalletPromotion] = None
     checkout_session: Optional[Dict[str, Any]] = None
+    billing_url = settings.billing_service_url
     try:
         if payload.promotion_id or payload.promotion_code:
             query = session.query(WalletPromotion).filter(WalletPromotion.user_id == current_user.id)
@@ -2437,18 +2450,49 @@ async def create_billing_stripe_session(
             int(amount_cents if not promotion_record else amount_cents * (promotion_record.multiplier or 2)),
         )
 
-        try:
-            checkout_session = create_checkout_session(
-                user=current_user,
-                amount_cents=amount_cents,
-                success_url=success_url,
-                cancel_url=cancel_url,
-                promotion=promotion_record,
-                metadata=metadata,
-            )
-        except ValueError as exc:
-            session.rollback()
-            raise HTTPException(status_code=400, detail=str(exc))
+        if billing_url:
+            user_uuid = uuid.uuid5(uuid.NAMESPACE_DNS, f"fishmouth-user-{current_user.id}")
+            remote_payload: Dict[str, Any] = {
+                "user_id": str(user_uuid),
+                "success_url": success_url,
+                "cancel_url": cancel_url,
+                "customer_email": current_user.email,
+                "metadata": metadata,
+                "amount_cents": amount_cents,
+            }
+            if payload.planId:
+                remote_payload["plan_code"] = payload.planId
+            try:
+                async with httpx.AsyncClient(timeout=10.0) as client:
+                    resp = await client.post(f"{billing_url.rstrip('/')}/checkout", json=remote_payload)
+                resp.raise_for_status()
+                data = resp.json()
+                plan_info = data.get("plan") or {}
+                checkout_session = {
+                    "id": data.get("session_id"),
+                    "url": data.get("checkout_url"),
+                    "mode": plan_info.get("mode", "payment"),
+                }
+            except (httpx.HTTPError, ValueError) as exc:
+                logger.exception("billing.remote_session_failed", error=str(exc))
+                if not settings.providers.stripe_secret_key:
+                    session.rollback()
+                    raise HTTPException(status_code=502, detail="Failed to create checkout session") from exc
+                checkout_session = None  # fall back to local Stripe below
+
+        if checkout_session is None:
+            try:
+                checkout_session = create_checkout_session(
+                    user=current_user,
+                    amount_cents=amount_cents,
+                    success_url=success_url,
+                    cancel_url=cancel_url,
+                    promotion=promotion_record,
+                    metadata=metadata,
+                )
+            except ValueError as exc:
+                session.rollback()
+                raise HTTPException(status_code=400, detail=str(exc))
 
         if promotion_record:
             session.add(promotion_record)

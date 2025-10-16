@@ -2,3 +2,9 @@ fastapi
 uvicorn[standard]
 pydantic
 httpx
+SQLAlchemy
+numpy
+Pillow
+pydantic-settings
+boto3
+cryptography

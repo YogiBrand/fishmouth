@@ -110,6 +110,8 @@ class Settings(BaseSettings):
     environment: str = Field("development")
     base_url: Optional[HttpUrl] = None
     database_url: str = Field("postgresql://fishmouth:fishmouth123@postgres:5432/fishmouth", env="DATABASE_URL")
+    address_lookup_service_url: Optional[str] = Field(None, env="ADDRESS_LOOKUP_SERVICE_URL")
+    billing_service_url: Optional[str] = Field(None, env="BILLING_SERVICE_URL")
 
     # Behaviour toggles
     roof_analysis_mode: str = Field("hybrid", description="live|mock|hybrid")

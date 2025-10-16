@@ -1,0 +1,3 @@
+https://naip.example/COG_1.tif
+https://naip.example/COG_2.tif
+# Replace with real NAIP/USGS COG URLs per docs/IMAGERY_SETUP.md

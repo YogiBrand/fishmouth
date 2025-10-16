@@ -22,6 +22,7 @@ export default function ScanPage() {
   const [scanSummaries, setScanSummaries] = useState([]);
   const [clusterSummaries, setClusterSummaries] = useState([]);
   const [tableLoading, setTableLoading] = useState(false);
+  const isDark = typeof document !== 'undefined' && document.documentElement.classList.contains('dark');
 
   const canSubmit = useMemo(() => Boolean(areaFeature && areaFeature.geometry), [areaFeature]);
 
@@ -110,15 +111,15 @@ export default function ScanPage() {
   return (
     <div className="p-6 space-y-4">
       <header className="space-y-1">
-        <h1 className="text-2xl font-semibold text-slate-900">Geospatial Scanner</h1>
-        <p className="text-sm text-slate-500">Draw a service region, spin up imagery fetch + enrichment, and monitor progress.</p>
+        <h1 className="text-2xl font-semibold text-slate-900 dark:text-slate-100">Geospatial Scanner</h1>
+        <p className="text-sm text-slate-500 dark:text-slate-400">Draw a service region, spin up imagery fetch + enrichment, and monitor progress.</p>
       </header>
 
-      <div className="rounded-2xl border border-slate-200 bg-white p-4 space-y-4 shadow-sm">
+      <div className="rounded-2xl border border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-900/70 p-4 space-y-4 shadow-sm">
         <label className="block space-y-1">
-          <span className="text-sm font-medium text-slate-700">Scan name</span>
+          <span className="text-sm font-medium text-slate-700 dark:text-slate-300">Scan name</span>
           <input
-            className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:outline-none"
+            className="w-full rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:outline-none dark:text-slate-100"
             value={name}
             onChange={(event) => setName(event.target.value)}
             placeholder="July storm polygon"
@@ -128,7 +129,7 @@ export default function ScanPage() {
         <DrawTool onAreaChange={setAreaFeature} />
 
         <div className="flex items-center justify-between gap-3">
-          <div className="text-xs text-slate-500">
+          <div className="text-xs text-slate-500 dark:text-slate-400">
             Provider policy: {DEFAULT_POLICY.order.join(' → ')} • Zoom {DEFAULT_POLICY.zoom}
           </div>
           <button
@@ -144,15 +145,15 @@ export default function ScanPage() {
             {scan?.id ? 'Re-run scan' : 'Start scan'}
           </button>
         </div>
-        {error && <div className="rounded bg-red-50 px-3 py-2 text-xs text-red-600">{error}</div>}
+        {error && <div className="rounded bg-red-50 dark:bg-red-900/30 px-3 py-2 text-xs text-red-600 dark:text-red-300">{error}</div>}
       </div>
 
       {scan?.id && (
-        <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm space-y-2">
+        <div className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900/70 p-4 shadow-sm space-y-2">
           <div className="flex items-center justify-between">
             <div>
-              <p className="text-sm font-semibold text-slate-700">Scan {scan.id}</p>
-              <p className="text-xs text-slate-500">Tiles estimated {scan.tiles_total}</p>
+              <p className="text-sm font-semibold text-slate-700 dark:text-slate-300">Scan {scan.id}</p>
+              <p className="text-xs text-slate-500 dark:text-slate-400">Tiles estimated {scan.tiles_total}</p>
             </div>
             <span
               className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-semibold ${
@@ -167,7 +168,7 @@ export default function ScanPage() {
             </span>
           </div>
           {scan.tiles_processed != null && (
-            <div className="text-xs text-slate-500">
+            <div className="text-xs text-slate-500 dark:text-slate-400">
               Processed {scan.tiles_processed ?? 0}/{scan.tiles_total ?? 0} tiles · Leads generated {scan.leads_generated ?? 0}
             </div>
           )}
@@ -175,8 +176,8 @@ export default function ScanPage() {
       )}
 
       <ScannerActivityTable
-        className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm"
-        isDark={false}
+        className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900/70 p-6 shadow-sm"
+        isDark={isDark}
         rows={scannerRows}
         scanCount={scanSummaries.length}
         clusterCount={clusterSummaries.length}

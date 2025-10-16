@@ -1,15 +1,20 @@
+from __future__ import annotations
 
-from fastapi import FastAPI, Request, HTTPException
+from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 import os, asyncpg, uuid
 import httpx, asyncio, time
 from typing import List, Optional, Dict, Any
 from .routes_messaging import router as messaging_router
 from .routes_queues import router as queues_router
+from .routes_messaging_provider_send import router as send_router
+from services.shared.telemetry_middleware import TelemetryMW
 
 app = FastAPI(title="Admin API", version="0.1.0")
 app.include_router(messaging_router)
 app.include_router(queues_router)
+app.include_router(send_router)
+app.add_middleware(TelemetryMW)
 DB_URL = os.getenv("ANALYTICS_URL", os.getenv("DATABASE_URL","postgresql://user:pass@postgres:5432/app"))
 TELEMETRY_URL = os.getenv("TELEMETRY_URL", "http://telemetry_gw_8030:8030")
 SERVICE_ID = "8031"
@@ -93,39 +98,6 @@ async def _check_redis() -> HealthStatus:
                 await writer.wait_closed()
             except Exception:
                 pass
-
-async def _emit_usage(path: str, method: str, status: int, duration_ms: float, user_id: str | None):
-    if SERVICE_ID == "8030":
-        return
-    payload = {
-        "service": SERVICE_ID,
-        "route": path,
-        "action": method.lower(),
-        "quantity": 1,
-        "unit": "request",
-        "meta": {"status": status, "duration_ms": duration_ms},
-    }
-    if user_id:
-        payload["user_id"] = user_id
-    try:
-        async with httpx.AsyncClient(timeout=1.0) as client:
-            await client.post(f"{TELEMETRY_URL}/event", json=payload)
-    except Exception:
-        pass
-
-@app.middleware("http")
-async def telemetry_middleware(request: Request, call_next):
-    start = time.time()
-    user_id = request.headers.get("x-user-id") or request.headers.get("X-User-Id")
-    try:
-        response = await call_next(request)
-    except Exception:
-        duration_ms = (time.time() - start) * 1000.0
-        asyncio.create_task(_emit_usage(request.url.path, request.method, 500, duration_ms, user_id))
-        raise
-    duration_ms = (time.time() - start) * 1000.0
-    asyncio.create_task(_emit_usage(request.url.path, request.method, response.status_code, duration_ms, user_id))
-    return response
 
 @app.on_event("startup")
 async def startup():

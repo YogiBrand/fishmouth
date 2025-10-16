@@ -1331,22 +1331,22 @@ const EnhancedReportGenerator = ({ lead: initialLead, businessProfile, onClose, 
   if (!visible) return null;
 
   return (
-    <div className="fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4">
-      <div className="bg-white rounded-xl max-w-7xl w-full max-h-[90vh] overflow-hidden flex flex-col">
+    <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4">
+      <div className="rounded-xl max-w-7xl w-full max-h-[90vh] overflow-hidden flex flex-col border ${typeof document !== 'undefined' && document.documentElement.classList.contains('dark') ? 'border-slate-800 bg-slate-900' : 'border-slate-200 bg-white'}">
         {/* Header */}
-        <div className="flex items-center justify-between p-6 border-b">
+        <div className={`flex items-center justify-between p-6 border-b ${typeof document !== 'undefined' && document.documentElement.classList.contains('dark') ? 'border-slate-800' : 'border-slate-200'}`}>
           <div className="flex items-center space-x-4">
             {step !== 'lead-selection' && (
               <button
                 onClick={goToPreviousStep}
-                className="p-2 hover:bg-gray-100 rounded-lg transition-colors"
+                className={`p-2 rounded-lg transition-colors ${typeof document !== 'undefined' && document.documentElement.classList.contains('dark') ? 'hover:bg-slate-800 text-slate-200' : 'hover:bg-gray-100'}`}
               >
                 <ArrowLeft className="w-5 h-5" />
               </button>
             )}
             <div>
-              <h1 className="text-xl font-semibold text-gray-900">Report Generator</h1>
-              <p className="text-sm text-gray-600">
+              <h1 className={`text-xl font-semibold ${typeof document !== 'undefined' && document.documentElement.classList.contains('dark') ? 'text-slate-100' : 'text-gray-900'}`}>Report Generator</h1>
+              <p className={`text-sm ${typeof document !== 'undefined' && document.documentElement.classList.contains('dark') ? 'text-slate-400' : 'text-gray-600'}`}>
                 {lead
                   ? `Creating report for ${lead.homeowner_name || lead.name || lead.address || 'selected lead'}`
                   : 'Select a lead to personalize your report'}
@@ -1359,7 +1359,7 @@ const EnhancedReportGenerator = ({ lead: initialLead, businessProfile, onClose, 
                 <button
                   onClick={saveReport}
                   disabled={loading || !lead?.id}
-                  className="flex items-center space-x-2 px-4 py-2 text-gray-700 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors disabled:opacity-50"
+                  className={`flex items-center space-x-2 px-4 py-2 rounded-lg transition-colors disabled:opacity-50 ${typeof document !== 'undefined' && document.documentElement.classList.contains('dark') ? 'text-slate-200 border border-slate-700 hover:bg-slate-800' : 'text-gray-700 border border-gray-300 hover:bg-gray-50'}`}
                 >
                   {loading ? <Loader className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
                   <span>Save Draft</span>
@@ -1367,7 +1367,7 @@ const EnhancedReportGenerator = ({ lead: initialLead, businessProfile, onClose, 
                 <button
                   onClick={renderPdf}
                   disabled={loading || !lead?.id}
-                  className="flex items-center space-x-2 px-4 py-2 text-gray-700 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors disabled:opacity-50"
+                  className={`flex items-center space-x-2 px-4 py-2 rounded-lg transition-colors disabled:opacity-50 ${typeof document !== 'undefined' && document.documentElement.classList.contains('dark') ? 'text-slate-200 border border-slate-700 hover:bg-slate-800' : 'text-gray-700 border border-gray-300 hover:bg-gray-50'}`}
                 >
                   {loading ? <Loader className="w-4 h-4 animate-spin" /> : <Download className="w-4 h-4" />}
                   <span>Render PDF</span>
@@ -1384,7 +1384,7 @@ const EnhancedReportGenerator = ({ lead: initialLead, businessProfile, onClose, 
             )}
             <button
               onClick={onClose}
-              className="p-2 hover:bg-gray-100 rounded-lg transition-colors"
+              className={`p-2 rounded-lg transition-colors ${typeof document !== 'undefined' && document.documentElement.classList.contains('dark') ? 'hover:bg-slate-800 text-slate-200' : 'hover:bg-gray-100'}`}
             >
               <X className="w-5 h-5" />
             </button>

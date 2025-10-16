@@ -1,0 +1,38 @@
+{
+  "info": {
+    "name": "FishMouth E2E",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "item": [
+    {
+      "name": "Health Backend",
+      "request": {
+        "method": "GET",
+        "url": "http://localhost:8000/health"
+      }
+    },
+    {
+      "name": "Admin Providers",
+      "request": {
+        "method": "GET",
+        "url": "http://localhost:8031/messaging/providers"
+      }
+    },
+    {
+      "name": "Manual Lead",
+      "request": {
+        "method": "POST",
+        "url": "http://localhost:8000/api/leads/manual",
+        "body": {
+          "mode": "raw",
+          "raw": "{\"address\":\"123 Main St, Austin, TX\"}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      }
+    }
+  ]
+}

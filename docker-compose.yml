@@ -39,6 +39,8 @@ services:
       REDIS_URL: redis://redis:6379
       LOG_JSON: "true"
       SERVICE_VERSION: ${SERVICE_VERSION:-dev}
+      ADDRESS_LOOKUP_SERVICE_URL: ${ADDRESS_LOOKUP_SERVICE_URL:-http://address_lookup_8022:8022}
+      BILLING_SERVICE_URL: ${BILLING_SERVICE_URL:-http://billing_gw_8032:8032}
       OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT:-}
       SENTRY_RELEASE: ${SENTRY_RELEASE:-local}
       JWT_SECRET: your-secret-key-change-in-production
@@ -76,6 +78,8 @@ services:
     environment:
       DATABASE_URL: postgresql://fishmouth:fishmouth123@postgres:5432/fishmouth
       REDIS_URL: redis://redis:6379
+      ADDRESS_LOOKUP_SERVICE_URL: ${ADDRESS_LOOKUP_SERVICE_URL:-http://address_lookup_8022:8022}
+      BILLING_SERVICE_URL: ${BILLING_SERVICE_URL:-http://billing_gw_8032:8032}
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       ELEVENLABS_API_KEY: ${ELEVENLABS_API_KEY:-}

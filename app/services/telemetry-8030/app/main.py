@@ -1,8 +1,10 @@
 from fastapi import FastAPI, Request
 from pydantic import BaseModel
 import os, asyncpg, time, json
+from services.shared.telemetry_middleware import TelemetryMW
 
 app = FastAPI(title="Telemetry Gateway", version="0.1.0")
+app.add_middleware(TelemetryMW)
 DB_URL = os.getenv("ANALYTICS_URL", os.getenv("DATABASE_URL","postgresql://user:pass@postgres:5432/app"))
 pool = None
 

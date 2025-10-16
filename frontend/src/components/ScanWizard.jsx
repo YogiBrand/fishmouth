@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import Map, { Layer, Marker, Source } from 'react-map-gl/maplibre';
 import maplibregl from 'maplibre-gl';
 import 'maplibre-gl/dist/maplibre-gl.css';
+import GeoScatterMap from './GeoScatterMap';
 import {
   AlertTriangle,
   ArrowLeft,
@@ -832,14 +833,14 @@ const ScanWizard = ({ onScanCreated, onClustersGenerated, isDark = false, onStep
     switch (activeStep) {
       case 0:
         return (
-          <div className="grid gap-6 lg:grid-cols-3">
+          <div className="grid gap-6 lg:grid-cols-3 items-stretch">
             <div className="lg:col-span-2 space-y-4">
               <div className={`overflow-hidden rounded-2xl border ${isDark ? 'border-slate-700 bg-slate-900/70' : 'border-gray-200 bg-white'}`}>
                 <Map
                   ref={mapRef}
                   mapLib={maplibregl}
                   initialViewState={initialViewState}
-                  style={{ width: '100%', height: 360 }}
+                  style={{ width: '100%', height: 420 }}
                   mapStyle={BASE_MAP_STYLE}
                   onMove={handleMapMove}
                   onClick={handleMapClick}
@@ -1071,7 +1072,7 @@ const ScanWizard = ({ onScanCreated, onClustersGenerated, isDark = false, onStep
               </div>
             </div>
 
-            <div className={`space-y-4 ${isDark ? 'text-slate-200' : 'text-gray-700'}`}>
+            <div className={`min-h-[420px] rounded-2xl border p-4 ${isDark ? 'border-slate-700 bg-slate-900/60 text-slate-200' : 'border-gray-200 bg-white text-gray-700'}`}>
               <form onSubmit={handleSearchSubmit} className="space-y-4">
                 <div className="space-y-3">
                   <p className={`text-xs ${isDark ? 'text-slate-400' : 'text-gray-600'}`}>
@@ -1148,95 +1149,44 @@ const ScanWizard = ({ onScanCreated, onClustersGenerated, isDark = false, onStep
                   We will center the map on the best match. Drawing polygons uses the current view for accurate tiles.
                 </p>
               </form>
+              <div className="grid gap-4 md:grid-cols-2 mt-4">
+                <div className={`rounded-2xl border p-4 text-sm ${isDark ? 'border-slate-700 bg-slate-900/60' : 'border-gray-200 bg-gray-50'}`}>
+                  <h4 className="font-semibold mb-2 flex items-center gap-2">
+                    <ShieldCheck size={16} className="text-emerald-500" /> Coverage tips
+                  </h4>
+                  <ul className="list-disc list-inside space-y-1">
+                    <li>Drop polygon points clockwise to avoid self-intersections.</li>
+                    <li>Use a tighter spacing (0.01) for dense neighbourhood scans.</li>
+                    <li>Bounding boxes are faster but may include non-target parcels.</li>
+                  </ul>
+                </div>
 
-              <div className={`rounded-2xl border p-4 text-sm ${isDark ? 'border-slate-700 bg-slate-900/60' : 'border-gray-200 bg-gray-50'}`}>
-                <h4 className="font-semibold mb-2 flex items-center gap-2">
-                  <ShieldCheck size={16} className="text-emerald-500" /> Coverage tips
-                </h4>
-                <ul className="list-disc list-inside space-y-1">
-                  <li>Drop polygon points clockwise to avoid self-intersections.</li>
-                  <li>Use a tighter spacing (0.01) for dense neighbourhood scans.</li>
-                  <li>Bounding boxes are faster but may include non-target parcels.</li>
-                </ul>
-              </div>
-
-              <div className={`rounded-2xl border p-4 text-sm ${isDark ? 'border-amber-700/40 bg-amber-950/40 text-amber-100' : 'border-amber-200 bg-amber-50 text-amber-900'}`}>
-                <h4 className="font-semibold mb-2 flex items-center gap-2">
-                  <Flame size={16} className="text-amber-500" /> Heatmap cluster insights
-                </h4>
-                <p className="text-xs mb-3">
-                  Spot storm repair hotspots and active permit clusters scraped from municipal sources within your selection. Pair this with SmartScans to focus crews where the action is.
-                </p>
-                <button
-                  type="button"
-                  onClick={handleClusterAnalysis}
-                  disabled={clusterInsights.loading || !clusterGeoJson}
-                  className={`inline-flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium transition-colors ${
-                    clusterInsights.loading || !clusterGeoJson
-                      ? 'cursor-not-allowed bg-amber-200 text-amber-500'
-                      : 'bg-amber-500 text-white hover:bg-amber-600'
-                  }`}
-                >
-                  {clusterInsights.loading ? <Loader2 size={16} className="animate-spin" /> : <Flame size={16} />}
-                  {clusterInsights.loading ? 'Analyzing…' : 'Analyze clusters'}
-                </button>
-                {!clusterGeoJson && (
-                  <p className="mt-2 text-xs text-amber-600">
-                    Draw or select an area to enable cluster analysis.
+                <div className={`rounded-2xl border p-4 text-sm ${isDark ? 'border-amber-700/40 bg-amber-950/40 text-amber-100' : 'border-amber-200 bg-amber-50 text-amber-900'}`}>
+                  <h4 className="font-semibold mb-2 flex items-center gap-2">
+                    <Flame size={16} className="text-amber-500" /> Heatmap cluster insights
+                  </h4>
+                  <p className="text-xs mb-3">
+                    Spot storm repair hotspots and active permit clusters scraped from municipal sources within your selection. Pair this with SmartScans to focus crews where the action is.
                   </p>
-                )}
-                {clusterInsights.error && (
-                  <p className="mt-2 text-xs text-red-500">{clusterInsights.error}</p>
-                )}
-                {clusterInsights.clusters && clusterInsights.clusters.length > 0 && (
-                  <div className="mt-3 space-y-2 max-h-64 overflow-y-auto pr-1">
-                    {clusterInsights.clusters.map((cluster, index) => {
-                      const badgeClass = (() => {
-                        const status = (cluster.cluster_status || '').toLowerCase();
-                        if (status === 'hot') return 'bg-red-500 text-white';
-                        if (status === 'active') return 'bg-emerald-500 text-white';
-                        if (status === 'warming') return 'bg-amber-400 text-slate-900';
-                        return 'bg-slate-500 text-white';
-                      })();
-                      const updatedAt = cluster.date_range_end || cluster.last_scored_at;
-                      const formattedDate = updatedAt ? new Date(updatedAt).toLocaleDateString() : 'recent';
-                      const sampleAddresses = cluster.metadata?.sample_addresses || cluster.metadata?.all_subdivisions || [];
-                      return (
-                        <div key={cluster.id || index} className={`rounded-xl border px-3 py-2 ${isDark ? 'border-amber-600/40 bg-amber-900/30' : 'border-amber-200 bg-white'}`}>
-                          <div className="flex items-center justify-between gap-2">
-                            <div>
-                              <div className="text-sm font-semibold">
-                                {cluster.city || 'Unknown'}, {cluster.state || '—'}
-                              </div>
-                              <div className="text-xs text-amber-700 dark:text-amber-200">
-                                Score {Number(cluster.cluster_score || 0).toFixed(1)} • {cluster.permit_count || 0} permits
-                              </div>
-                            </div>
-                            <span className={`rounded-full px-2 py-1 text-[10px] font-semibold uppercase ${badgeClass}`}>
-                              {cluster.cluster_status || 'unknown'}
-                            </span>
-                          </div>
-                          <div className="mt-2 text-xs text-amber-700 dark:text-amber-100 flex flex-wrap gap-x-4 gap-y-1">
-                            <span>Latest activity: {formattedDate}</span>
-                            {cluster.avg_permit_value && (
-                              <span>Avg permit ${Number(cluster.avg_permit_value).toLocaleString()}</span>
-                            )}
-                          </div>
-                          {sampleAddresses.length > 0 && (
-                            <div className="mt-2 text-xs text-amber-700 dark:text-amber-100">
-                              <span className="font-semibold">Sample addresses:</span>
-                              <ul className="mt-1 list-disc list-inside space-y-1">
-                                {sampleAddresses.slice(0, 3).map((address, addrIdx) => (
-                                  <li key={addrIdx}>{address}</li>
-                                ))}
-                              </ul>
-                            </div>
-                          )}
-                        </div>
-                      );
-                    })}
-                  </div>
-                )}
+                  <button
+                    type="button"
+                    onClick={handleClusterAnalysis}
+                    disabled={clusterInsights.loading || !clusterGeoJson}
+                    className={`inline-flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium transition-colors ${
+                      clusterInsights.loading || !clusterGeoJson
+                        ? 'cursor-not-allowed bg-amber-200 text-amber-500'
+                        : 'bg-amber-500 text-white hover:bg-amber-600'
+                    }`}
+                  >
+                    {clusterInsights.loading ? <Loader2 size={16} className="animate-spin" /> : <Flame size={16} />}
+                    {clusterInsights.loading ? 'Analyzing…' : 'Analyze clusters'}
+                  </button>
+                  {!clusterGeoJson && (
+                    <p className="mt-2 text-xs text-amber-600">
+                      Draw or select an area to enable cluster analysis.
+                    </p>
+                  )}
+                </div>
               </div>
             </div>
           </div>
@@ -1548,7 +1498,7 @@ const ScanWizard = ({ onScanCreated, onClustersGenerated, isDark = false, onStep
         })}
       </ol>
 
-      <div className="rounded-3xl border border-gray-200 bg-white p-6 shadow-sm">
+      <div className={`rounded-3xl border p-6 shadow-sm ${isDark ? 'border-slate-800 bg-slate-900/60' : 'border-gray-200 bg-white'}`}>
         {renderStep()}
 
         <div className="mt-6 flex items-center justify-between border-t pt-4">
@@ -1584,6 +1534,26 @@ const ScanWizard = ({ onScanCreated, onClustersGenerated, isDark = false, onStep
           )}
         </div>
       </div>
+
+      {/* Full-width heatmap enrichment panel */}
+      {clusterInsights.clusters && clusterInsights.clusters.length > 0 && (
+        <div className={`rounded-2xl border p-4 ${isDark ? 'border-slate-800 bg-slate-900/70' : 'border-slate-200 bg-white'}`}>
+          <div className="flex items-center justify-between mb-3">
+            <h4 className={`text-sm font-semibold ${isDark ? 'text-slate-100' : 'text-gray-900'}`}>Enrichment Heatmap</h4>
+            <span className={`text-xs ${isDark ? 'text-slate-400' : 'text-gray-500'}`}>{clusterInsights.clusters.length} clusters visualised</span>
+          </div>
+          {(() => {
+            const points = (clusterInsights.clusters || []).map((c, i) => ({
+              id: c.id || i,
+              latitude: Number(c.center_latitude || c.lat || c.latitude || 0),
+              longitude: Number(c.center_longitude || c.lon || c.longitude || 0),
+              lead_score: Number(c.cluster_score || 50),
+              priority: (c.cluster_status || 'warm').toLowerCase(),
+            })).filter((p) => Number.isFinite(p.latitude) && Number.isFinite(p.longitude));
+            return <GeoScatterMap points={points} isDark={isDark} height={380} />;
+          })()}
+        </div>
+      )}
 
       {(jobStatus || jobResults) && (
         <div className="space-y-4">

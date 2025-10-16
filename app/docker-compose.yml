@@ -29,10 +29,13 @@ services:
 
   telemetry_gw_8030:
     build:
-      context: ./services/telemetry-8030
+      context: ..
+      dockerfile: app/services/telemetry-8030/Dockerfile
     environment:
       DATABASE_URL: postgresql://user:pass@postgres:5432/app
       ANALYTICS_URL: postgresql://user:pass@postgres:5432/app
+      SERVICE_NAME: telemetry-8030
+      TELEMETRY_URL: http://telemetry_gw_8030:8030
     depends_on:
       postgres:
         condition: service_healthy
@@ -41,11 +44,14 @@ services:
 
   admin_api_8031:
     build:
-      context: ./services/admin-api-8031
+      context: ..
+      dockerfile: app/services/admin-api-8031/Dockerfile
     environment:
       DATABASE_URL: postgresql://user:pass@postgres:5432/app
       ANALYTICS_URL: postgresql://user:pass@postgres:5432/app
-      TELEMETRY_URL: ${TELEMETRY_URL:-http://telemetry_gw_8030:8030}
+      SERVICE_NAME: admin-api-8031
+      TELEMETRY_URL: http://telemetry_gw_8030:8030
+      ORCH_URL: http://orchestrator_8001:8001
     depends_on:
       postgres:
         condition: service_healthy
@@ -56,9 +62,11 @@ services:
 
   billing_gw_8032:
     build:
-      context: ./services/billing-gw-8032
+      context: ..
+      dockerfile: app/services/billing-gw-8032/Dockerfile
     environment:
-      TELEMETRY_URL: ${TELEMETRY_URL:-http://telemetry_gw_8030:8030}
+      SERVICE_NAME: billing-gw-8032
+      TELEMETRY_URL: http://telemetry_gw_8030:8030
       STRIPE_SECRET_KEY: ${STRIPE_SECRET_KEY:-}
     depends_on:
       telemetry_gw_8030:

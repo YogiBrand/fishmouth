@@ -8,6 +8,7 @@ from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Tuple
 from types import SimpleNamespace
 
+import httpx
 from sqlalchemy.orm import Session
 
 from config import get_settings
@@ -147,6 +148,50 @@ class LeadGenerationService:
 
     def __init__(self, db: Session):
         self.db = db
+
+    @staticmethod
+    def _compose_manual_address(
+        address_line1: str,
+        address_line2: Optional[str],
+        city: Optional[str],
+        state: Optional[str],
+        postal_code: Optional[str],
+    ) -> str:
+        parts: List[str] = []
+        if address_line1 and address_line1.strip():
+            parts.append(address_line1.strip())
+        if address_line2 and address_line2.strip():
+            parts.append(address_line2.strip())
+        locality = ", ".join(
+            part.strip()
+            for part in [city or "", state or "", postal_code or ""]
+            if part and part.strip()
+        )
+        if locality:
+            parts.append(locality)
+        return ", ".join(parts)
+
+    @staticmethod
+    def _priority_from_label(label: Optional[str]) -> LeadPriority:
+        if not label:
+            return LeadPriority.COLD
+        mapping = {
+            "hot": LeadPriority.HOT,
+            "warm": LeadPriority.WARM,
+            "cold": LeadPriority.COLD,
+        }
+        return mapping.get(label.lower(), LeadPriority.COLD)
+
+    @staticmethod
+    def _infer_quality_status(report: ImageryQualityReport) -> str:
+        score = float(report.overall_score or 0.0)
+        critical_issues = {"cloud_cover", "heavy_shadows", "poor_roof_visibility"}
+        has_critical = any(issue in critical_issues for issue in report.issues)
+        if score < 45:
+            return "failed"
+        if score < 55 or has_critical:
+            return "review"
+        return "passed"
 
     async def start_area_scan(
         self,
@@ -363,7 +408,7 @@ class LeadGenerationService:
                     contact_enricher.aclose(),
                 )
 
-    async def generate_manual_lead(
+    async def _generate_manual_lead_inline(
         self,
         user_id: int,
         *,
@@ -482,6 +527,453 @@ class LeadGenerationService:
             raise ValueError("Unable to generate a qualified lead for the supplied address")
 
         return result
+
+    async def generate_manual_lead(
+        self,
+        user_id: int,
+        *,
+        address_line1: str,
+        address_line2: Optional[str] = None,
+        city: Optional[str] = None,
+        state: Optional[str] = None,
+        postal_code: Optional[str] = None,
+        latitude: Optional[float] = None,
+        longitude: Optional[float] = None,
+        include_street_view: bool = True,
+    ) -> CandidateProcessingResult:
+        """Entry point for manual SmartScan requests.
+
+        Prefers the dedicated address lookup service when configured, with a graceful fallback
+        to the legacy inline pipeline if the service is unavailable or fails.
+        """
+
+        if not address_line1 or not address_line1.strip():
+            raise ValueError("Address line 1 is required")
+
+        service_url = settings.address_lookup_service_url
+        if service_url:
+            composed_address = self._compose_manual_address(
+                address_line1,
+                address_line2,
+                city,
+                state,
+                postal_code,
+            )
+            try:
+                return await self._generate_manual_lead_via_service(
+                    user_id,
+                    address_input=composed_address,
+                    address_line1=address_line1,
+                    address_line2=address_line2,
+                    city=city,
+                    state=state,
+                    postal_code=postal_code,
+                    include_street_view=include_street_view,
+                )
+            except Exception as exc:
+                logger.exception(
+                    "manual_lead.remote_failed",
+                    extra={
+                        "user_id": user_id,
+                        "address": composed_address,
+                        "error": str(exc),
+                    },
+                )
+
+        return await self._generate_manual_lead_inline(
+            user_id,
+            address_line1=address_line1,
+            address_line2=address_line2,
+            city=city,
+            state=state,
+            postal_code=postal_code,
+            latitude=latitude,
+            longitude=longitude,
+            include_street_view=include_street_view,
+        )
+
+    async def _generate_manual_lead_via_service(
+        self,
+        user_id: int,
+        *,
+        address_input: str,
+        address_line1: str,
+        address_line2: Optional[str],
+        city: Optional[str],
+        state: Optional[str],
+        postal_code: Optional[str],
+        include_street_view: bool,
+    ) -> CandidateProcessingResult:
+        service_url = settings.address_lookup_service_url
+        if not service_url:
+            raise ValueError("Address lookup service URL is not configured")
+
+        payload = {"address": address_input}
+        async with httpx.AsyncClient(timeout=settings.http_timeout_seconds) as client:
+            response = await client.post(f"{service_url.rstrip('/')}/lookup", json=payload)
+            response.raise_for_status()
+            job_meta = response.json()
+            job_id = job_meta.get("job_id")
+            if not job_id:
+                raise ValueError("Address lookup service did not return a job identifier")
+
+            attempt = 0
+            max_attempts = 60  # ~45 seconds worst case with backoff
+            delay = 0.5
+            while attempt < max_attempts:
+                detail_resp = await client.get(f"{service_url.rstrip('/')}/lookup/{job_id}")
+                detail_resp.raise_for_status()
+                job_detail = detail_resp.json()
+                status = job_detail.get("status")
+                if status == "complete":
+                    result_payload = job_detail.get("result")
+                    if not result_payload:
+                        raise ValueError("Address lookup completed without a result payload")
+                    return self._build_manual_lead_from_lookup(
+                        user_id,
+                        result_payload,
+                        include_street_view=include_street_view,
+                    )
+                if status == "failed":
+                    raise ValueError(job_detail.get("error") or "Address lookup job failed")
+
+                await asyncio.sleep(delay)
+                attempt += 1
+                delay = min(delay * 1.3, 2.0)
+
+        raise TimeoutError("Address lookup job did not complete in time")
+
+    def _build_manual_lead_from_lookup(
+        self,
+        user_id: int,
+        lookup_result: Dict[str, Any],
+        *,
+        include_street_view: bool,
+    ) -> CandidateProcessingResult:
+        address_block = lookup_result.get("address") or {}
+        geocode = address_block.get("geocode") or {}
+        latitude = geocode.get("lat")
+        longitude = geocode.get("lon")
+        if latitude is None or longitude is None:
+            raise ValueError("Address lookup response is missing coordinates")
+
+        try:
+            lat_f = float(latitude)
+            lon_f = float(longitude)
+        except (TypeError, ValueError) as exc:  # noqa: BLE001
+            raise ValueError("Address lookup returned invalid coordinate values") from exc
+
+        normalized_address = address_block.get("normalized") or address_block.get("input")
+        if not normalized_address:
+            normalized_address = f"{lat_f:.5f}, {lon_f:.5f}"
+
+        components = geocode.get("components") or {}
+        city = (
+            components.get("city")
+            or components.get("town")
+            or components.get("municipality")
+            or components.get("suburb")
+            or components.get("borough")
+        )
+        state = components.get("state") or components.get("region")
+        postal_code = (
+            components.get("postcode")
+            or components.get("postal_code")
+            or components.get("zip")
+        )
+
+        property_payload = lookup_result.get("enrichment") or {}
+        property_profile = PropertyProfile(
+            year_built=property_payload.get("year_built"),
+            property_type=property_payload.get("property_type"),
+            lot_size_sqft=property_payload.get("lot_size_sqft"),
+            roof_material=property_payload.get("roof_material"),
+            bedrooms=property_payload.get("bedrooms"),
+            bathrooms=property_payload.get("bathrooms"),
+            square_feet=property_payload.get("square_feet"),
+            property_value=property_payload.get("property_value"),
+            last_roof_replacement_year=property_payload.get("last_roof_replacement_year"),
+            source=property_payload.get("source", "synthetic"),
+        )
+
+        contact_payload = lookup_result.get("contact") or {}
+        contact_profile = ContactProfile(
+            homeowner_name=contact_payload.get("homeowner_name") or contact_payload.get("full_name"),
+            email=contact_payload.get("email"),
+            phone=contact_payload.get("phone"),
+            length_of_residence_years=contact_payload.get("length_of_residence_years")
+            or contact_payload.get("length_of_residence"),
+            household_income=contact_payload.get("household_income"),
+            confidence=float(contact_payload.get("confidence") or 0.6),
+            source=contact_payload.get("source", "synthetic"),
+        )
+
+        normalized_phone = normalize_phone_number(contact_profile.phone)
+        contact_profile.phone = normalized_phone
+        normalized_email = normalize_email(contact_profile.email)
+        if normalized_email and verify_email_deliverability(normalized_email):
+            contact_profile.email = normalized_email
+        else:
+            contact_profile.email = None
+
+        analysis_block = lookup_result.get("analysis") or {}
+        roof_analysis_block = analysis_block.get("roof_analysis") or {}
+        if not roof_analysis_block:
+            raise ValueError("Address lookup response missing roof analysis data")
+
+        roof_age_years = roof_analysis_block.get("roof_age_years")
+        if roof_age_years is None and property_profile.year_built:
+            roof_age_years = max(datetime.utcnow().year - property_profile.year_built, 0)
+
+        analysis = RoofAnalysisResult(
+            roof_age_years=roof_age_years or 0,
+            condition_score=float(roof_analysis_block.get("condition_score") or 0.0),
+            replacement_urgency=roof_analysis_block.get("replacement_urgency") or "plan_ahead",
+            damage_indicators=list(roof_analysis_block.get("damage_indicators") or []),
+            metrics=roof_analysis_block.get("metrics") or {},
+            confidence=float(roof_analysis_block.get("confidence") or 0.6),
+            summary=roof_analysis_block.get("summary") or "Roof analysis summary unavailable.",
+        )
+
+        imagery_block = analysis_block.get("imagery") or {}
+        imagery_quality_block = imagery_block.get("quality") or {}
+        imagery_quality = ImageryQualityReport(
+            overall_score=float(imagery_quality_block.get("overall_score") or imagery_quality_block.get("score") or 0.0),
+            metrics=imagery_quality_block.get("metrics") or {},
+            issues=list(imagery_quality_block.get("issues") or []),
+        )
+
+        quality_result = lookup_result.get("quality") or {}
+        quality_score = float(quality_result.get("quality_score") or imagery_quality.overall_score or 0.0)
+        quality_status = quality_result.get("quality_status") or self._infer_quality_status(imagery_quality)
+
+        score_data = quality_result.get("score") or {}
+        if score_data:
+            breakdown: Dict[str, float] = {}
+            for key, value in (score_data.get("breakdown") or {}).items():
+                try:
+                    breakdown[str(key)] = float(value)
+                except (TypeError, ValueError):
+                    continue
+            try:
+                score_value = float(score_data.get("value"))
+            except (TypeError, ValueError):
+                score_value = float(quality_score)
+            priority_enum = self._priority_from_label(score_data.get("priority"))
+            score_result = LeadScoreResult(score=score_value, priority=priority_enum, breakdown=breakdown)
+        else:
+            score_result = self.scoring_engine.score(analysis, property_profile, contact_profile, imagery_quality)
+
+        street_assets_raw = analysis_block.get("street_view_assets") or []
+        street_view_summary: List[Dict[str, Any]] = []
+        for asset in street_assets_raw:
+            if not isinstance(asset, dict):
+                continue
+            street_view_summary.append(
+                {
+                    "heading": asset.get("heading"),
+                    "distance_m": asset.get("distance_m"),
+                    "quality_score": asset.get("quality_score"),
+                    "occlusion_score": asset.get("occlusion_score"),
+                    "public_url": asset.get("public_url"),
+                    "anomalies": [
+                        {
+                            "type": anomaly.get("type"),
+                            "severity": anomaly.get("severity"),
+                            "probability": anomaly.get("probability"),
+                            "description": anomaly.get("description"),
+                        }
+                        for anomaly in asset.get("anomalies", [])
+                        if isinstance(anomaly, dict)
+                    ],
+                }
+            )
+
+        street_view_quality = None
+        if street_view_summary:
+            qualities = [item.get("quality_score", 0.0) or 0.0 for item in street_view_summary]
+            occlusions = [item.get("occlusion_score", 0.0) or 0.0 for item in street_view_summary]
+            street_view_quality = {
+                "angles_captured": len(street_view_summary),
+                "average_quality": round(sum(qualities) / len(qualities), 3) if qualities else 0.0,
+                "average_occlusion": round(sum(occlusions) / len(occlusions), 3) if occlusions else 0.0,
+                "headings": [item.get("heading") for item in street_view_summary if item.get("heading") is not None],
+            }
+
+        anomaly_bundle = analysis_block.get("anomaly_bundle") or {}
+        anomaly_types = {
+            anomaly.get("type")
+            for anomaly in anomaly_bundle.get("anomalies", [])
+            if isinstance(anomaly, dict) and anomaly.get("type")
+        }
+        damage_indicators = sorted(set(analysis.damage_indicators or []) | anomaly_types)
+        analysis.damage_indicators = damage_indicators
+
+        heatmap_url = anomaly_bundle.get("heatmap_url")
+        imagery_source = imagery_block.get("source", "synthetic")
+        normalized_view_block = analysis_block.get("normalized_view") or {}
+
+        ai_payload = {
+            "summary": analysis.summary,
+            "metrics": analysis.metrics,
+            "damage_indicators": damage_indicators,
+            "replacement_urgency": analysis.replacement_urgency,
+            "confidence": analysis.confidence,
+            "score_breakdown": score_result.breakdown,
+            "score_version": LeadScoringEngine.SCORE_VERSION,
+            "imagery": {
+                "source": imagery_source,
+                "captured_at": imagery_block.get("captured_at"),
+                "resolution": imagery_block.get("resolution"),
+                "quality_status": quality_status,
+                "quality": {
+                    "score": quality_score,
+                    "issues": imagery_quality.issues,
+                    "metrics": imagery_quality.metrics,
+                },
+                "normalized_view_url": normalized_view_block.get("image_url"),
+                "mask_url": normalized_view_block.get("mask_url"),
+                "heatmap_url": heatmap_url,
+            },
+            "street_view": street_view_summary,
+            "property_profile": asdict(property_profile),
+            "contact_profile": asdict(contact_profile),
+            "enhanced_roof_intelligence": analysis_block.get("dossier") or {},
+        }
+
+        address_key = canonical_address_key(normalized_address, city, state, postal_code)
+        dedupe_key = compute_dedupe_key(contact_profile.homeowner_name, address_key)
+
+        now_iso = datetime.utcnow().isoformat()
+        provenance_entry = {
+            "discovery": {"source": "manual_lookup", "timestamp": now_iso},
+            "property_enrichment": {
+                "source": property_profile.source,
+                "cached": False,
+                "timestamp": now_iso,
+            },
+            "contact_enrichment": {
+                "source": contact_profile.source,
+                "cached": False,
+                "timestamp": now_iso,
+            },
+            "imagery": {
+                "source": imagery_source,
+                "quality_score": quality_score,
+                "status": quality_status,
+                "timestamp": now_iso,
+            },
+        }
+
+        lead_payload: Dict[str, Any] = {
+            "user_id": user_id,
+            "area_scan_id": None,
+            "address": normalized_address,
+            "city": city,
+            "state": state,
+            "zip_code": postal_code,
+            "latitude": lat_f,
+            "longitude": lon_f,
+            "roof_age_years": analysis.roof_age_years,
+            "roof_condition_score": analysis.condition_score,
+            "roof_material": property_profile.roof_material,
+            "roof_size_sqft": property_profile.square_feet,
+            "aerial_image_url": imagery_block.get("public_url"),
+            "ai_analysis": ai_payload,
+            "lead_score": float(score_result.score),
+            "priority": score_result.priority,
+            "replacement_urgency": analysis.replacement_urgency,
+            "damage_indicators": damage_indicators,
+            "discovery_status": "manual_lookup",
+            "imagery_status": imagery_source,
+            "property_enrichment_status": property_profile.source,
+            "contact_enrichment_status": contact_profile.source,
+            "homeowner_name": contact_profile.homeowner_name,
+            "homeowner_email": contact_profile.email,
+            "homeowner_phone": contact_profile.phone,
+            "contact_enriched": bool(contact_profile.phone or contact_profile.email),
+            "property_value": property_profile.property_value,
+            "year_built": property_profile.year_built,
+            "property_type": property_profile.property_type,
+            "length_of_residence": contact_profile.length_of_residence_years,
+            "cost_to_generate": self._estimate_acquisition_cost(
+                imagery_source,
+                contact_profile,
+                len(street_view_summary) if include_street_view else 0,
+            ),
+            "estimated_value": self._estimate_project_value(property_profile),
+            "conversion_probability": min(95.0, float(score_result.score) + 12.0),
+            "status": LeadStatus.NEW,
+            "image_quality_score": quality_score,
+            "image_quality_issues": imagery_quality.issues,
+            "quality_validation_status": quality_status,
+            "analysis_confidence": analysis.confidence,
+            "score_version": quality_result.get("version") or LeadScoringEngine.SCORE_VERSION,
+            "roof_intelligence": analysis_block.get("dossier") or {},
+            "street_view_quality": street_view_quality,
+            "dedupe_key": dedupe_key,
+            "dnc": False,
+            "consent_email": False,
+            "consent_sms": False,
+            "consent_voice": False,
+            "overlay_url": heatmap_url,
+        }
+
+        area_stub = SimpleNamespace(id=None, user_id=user_id)
+        lead, merged = self._upsert_lead(area_stub, lead_payload, provenance_entry)
+        lead.ai_analysis = ai_payload
+        lead.analysis_confidence = analysis.confidence
+        lead.score_version = lead_payload["score_version"]
+        lead.overlay_url = heatmap_url or lead.overlay_url
+
+        cached_flags = {"property": False, "contact": False}
+
+        activity_metadata = {
+            "score": score_result.score,
+            "priority": score_result.priority.value,
+            "damage_indicators": damage_indicators,
+            "roof_age_years": analysis.roof_age_years,
+            "imagery_source": imagery_source,
+            "property_enrichment": property_profile.source,
+            "contact_enrichment": contact_profile.source,
+            "discovery_source": "manual_lookup",
+            "quality_score": quality_score,
+            "quality_status": quality_status,
+            "heatmap_url": heatmap_url,
+            "confidence": analysis.confidence,
+            "street_view_angles": [item.get("heading") for item in street_view_summary if item.get("heading") is not None],
+            "merged": merged,
+            "cached": cached_flags,
+        }
+        if score_result.breakdown:
+            activity_metadata["score_breakdown"] = score_result.breakdown
+        if quality_result.get("recommended_actions"):
+            activity_metadata["recommended_actions"] = quality_result.get("recommended_actions")
+
+        activity = LeadActivity(
+            lead_id=lead.id,
+            user_id=user_id,
+            activity_type="manual_lead_merged" if merged else "manual_lead_created",
+            title="Lead updated via manual lookup" if merged else "Manual SmartScan lead",
+            description=analysis.summary,
+            metadata=activity_metadata,
+        )
+        self.db.add(activity)
+        self.db.flush()
+
+        return CandidateProcessingResult(
+            lead=lead,
+            score=score_result,
+            analysis=analysis,
+            property_profile=property_profile,
+            contact_profile=contact_profile,
+            merged=merged,
+            provenance=provenance_entry,
+            quality_score=quality_score,
+            quality_status=quality_status,
+            cached_flags=cached_flags,
+            activity=activity,
+        )
 
     async def _process_candidate(
         self,

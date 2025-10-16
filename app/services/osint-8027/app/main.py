@@ -1,75 +1,86 @@
-from fastapi import FastAPI, Request
-from pydantic import BaseModel
-import os, time, asyncio
-import httpx
+from __future__ import annotations
 
-app = FastAPI(title="OSINT Contacts (8027)", version="0.1.0")
+import asyncio
+import os
+from dataclasses import asdict
+from typing import Any, Dict, Optional
+
+import httpx
+from fastapi import FastAPI, HTTPException
+from pydantic import BaseModel, Field
+
+from services.shared.telemetry_middleware import TelemetryMW
+
+from services.providers.contact_enrichment import ContactEnrichmentService
+
+app = FastAPI(title="OSINT Contacts (8027)", version="1.0.0")
+app.add_middleware(TelemetryMW)
+
 TELEMETRY_URL = os.getenv("TELEMETRY_URL", "http://telemetry_gw_8030:8030")
 SERVICE_ID = "8027"
 
-async def _emit_usage(path: str, method: str, status: int, duration_ms: float, user_id: str | None):
-    if SERVICE_ID == "8030":
-        return
-    payload = {
-        "service": SERVICE_ID,
-        "route": path,
-        "action": method.lower(),
-        "quantity": 1,
-        "unit": "request",
-        "meta": {"status": status, "duration_ms": duration_ms},
-    }
-    if user_id:
-        payload["user_id"] = user_id
-    try:
-        async with httpx.AsyncClient(timeout=1.0) as client:
-            await client.post(f"{TELEMETRY_URL}/event", json=payload)
-    except Exception:
-        pass
 
-async def _emit_cost(item: str, quantity: float, unit: str, unit_cost: float, meta: dict | None = None):
-    if SERVICE_ID == "8030":
-        return
-    data = {
+async def _emit_cost(item: str, quantity: float, unit: str, unit_cost: float, meta: Dict[str, Any]) -> None:
+    payload = {
         "service": SERVICE_ID,
         "item": item,
         "quantity": quantity,
         "unit": unit,
         "unit_cost": unit_cost,
-        "meta": meta or {},
+        "meta": meta,
     }
     try:
-        async with httpx.AsyncClient(timeout=1.0) as client:
-            await client.post(f"{TELEMETRY_URL}/cost", json=data)
+        async with httpx.AsyncClient(timeout=2.0) as client:
+            await client.post(f"{TELEMETRY_URL}/cost", json=payload)
     except Exception:
         pass
 
-@app.middleware("http")
-async def telemetry_middleware(request: Request, call_next):
-    start = time.time()
-    user_id = request.headers.get("x-user-id") or request.headers.get("X-User-Id")
-    try:
-        response = await call_next(request)
-    except Exception:
-        duration_ms = (time.time() - start) * 1000.0
-        asyncio.create_task(_emit_usage(request.url.path, request.method, 500, duration_ms, user_id))
-        raise
-    duration_ms = (time.time() - start) * 1000.0
-    asyncio.create_task(_emit_usage(request.url.path, request.method, response.status_code, duration_ms, user_id))
-    return response
 
 class Health(BaseModel):
     status: str = "ok"
 
+
 @app.get("/health", response_model=Health)
-async def health():
+async def health() -> Health:
     return Health()
 
-class ContactQuery(BaseModel):
-    name: str
-    domain_hint: str | None = None
 
-@app.post("/discover")
-async def discover(q: ContactQuery):
-    asyncio.create_task(_emit_cost("contact_discovery", 1, "lookup", 0.03, {"name": q.name}))
-    # Stub: integrate email permutation + verifier (Reacher) offline
-    return {"emails": [], "confidence": 0.0, "notes": "Replace with Reacher + patterns"}
+class DiscoverRequest(BaseModel):
+    address: str = Field(..., description="Normalized street address.")
+    city: Optional[str] = Field(default=None)
+    state: Optional[str] = Field(default=None)
+
+
+class ContactProfileOut(BaseModel):
+    homeowner_name: Optional[str] = None
+    email: Optional[str] = None
+    phone: Optional[str] = None
+    length_of_residence_years: Optional[int] = None
+    household_income: Optional[int] = None
+    confidence: float
+    source: str
+
+
+@app.post("/discover", response_model=ContactProfileOut)
+async def discover(req: DiscoverRequest) -> ContactProfileOut:
+    service = ContactEnrichmentService()
+    try:
+        profile = await service.enrich(req.address, req.city, req.state)
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=502, detail=f"contact_enrichment_failed: {exc}") from exc
+    finally:
+        try:
+            await service.aclose()
+        except Exception:
+            pass
+
+    asyncio.create_task(
+        _emit_cost(
+            "contact_discovery",
+            1,
+            "lookup",
+            0.05 if profile.source == "remote" else 0.0,
+            {"address": req.address, "provider": profile.source},
+        )
+    )
+    return ContactProfileOut(**asdict(profile))

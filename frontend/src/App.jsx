@@ -17,6 +17,7 @@ import ReportPage from './pages/ReportPage';
 import SharedReportPage from './pages/SharedReportPage';
 import ErrorBoundary from './components/ErrorBoundary';
 import CookieConsent from './components/CookieConsent';
+import AIChatbot from './components/AIChatbot';
 import NotFound from './pages/NotFound';
 import Terms from './pages/Terms';
 import Privacy from './pages/Privacy';
@@ -210,6 +211,7 @@ function App() {
           <Route path="*" element={<NotFound />} />
         </Routes>
         <CookieConsent />
+        <AIChatbot />
         </ErrorBoundary>
       </AuthProvider>
     </Router>

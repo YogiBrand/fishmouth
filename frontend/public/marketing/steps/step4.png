@@ -1,5 +1,3 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="800" height="420">
-  <rect width="800" height="420" fill="#ffffff"/>
-  <rect x="20" y="20" width="760" height="380" fill="#f6f7f9" stroke="#e5e7eb"/>
-  <text x="50%" y="50%" dominant-baseline="middle" text-anchor="middle" fill="#111" font-size="22">Step 4 mock</text>
-</svg>
+version https://git-lfs.github.com/spec/v1
+oid sha256:aa249de800e2a7a6e3babbf72ecc5da36a03dd628975ff89c1f6e9ac8c0e10d5
+size 322

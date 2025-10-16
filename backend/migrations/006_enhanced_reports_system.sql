@@ -1,10 +1,12 @@
 -- Enhanced Reports System Migration
 -- Create tables for comprehensive report generation with AI integration
 
+CREATE EXTENSION IF NOT EXISTS pgcrypto;
+
 -- Reports table for storing report configurations and content
 CREATE TABLE IF NOT EXISTS reports (
-    id VARCHAR(36) PRIMARY KEY,
-    lead_id VARCHAR(36) NOT NULL,
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    lead_id UUID NOT NULL,
     type VARCHAR(50) NOT NULL, -- damage-assessment, inspection-report, project-proposal, case-study
     config JSONB NOT NULL DEFAULT '{}', -- Report configuration (sections, branding, customizations)
     content JSONB NOT NULL DEFAULT '{}', -- AI-generated and custom content by section
@@ -25,8 +27,8 @@ CREATE TABLE IF NOT EXISTS ai_generations (
     section VARCHAR(100) NOT NULL, -- Section identifier (executive_summary, damage_analysis, etc.)
     prompt TEXT NOT NULL, -- The prompt used for generation
     content TEXT NOT NULL, -- Generated content
-    report_id VARCHAR(36), -- Associated report (optional)
-    lead_id VARCHAR(36), -- Associated lead (optional)
+    report_id UUID, -- Associated report (optional)
+    lead_id UUID, -- Associated lead (optional)
     model_used VARCHAR(50) DEFAULT 'default', -- AI model identifier
     generation_time_ms INTEGER, -- Time taken to generate
     tokens_used INTEGER, -- Tokens consumed
@@ -55,7 +57,7 @@ CREATE TABLE IF NOT EXISTS report_section_templates (
 -- Report views and interactions tracking
 CREATE TABLE IF NOT EXISTS report_interactions (
     id SERIAL PRIMARY KEY,
-    report_id VARCHAR(36) NOT NULL,
+    report_id UUID NOT NULL,
     interaction_type VARCHAR(50) NOT NULL, -- viewed, downloaded, shared, edited
     user_agent TEXT,
     ip_address INET,
@@ -69,9 +71,9 @@ CREATE TABLE IF NOT EXISTS report_interactions (
 -- Report sharing and access control
 CREATE TABLE IF NOT EXISTS report_shares (
     id SERIAL PRIMARY KEY,
-    report_id VARCHAR(36) NOT NULL,
+    report_id UUID NOT NULL,
     share_token VARCHAR(64) UNIQUE NOT NULL, -- Random token for public access
-    lead_id VARCHAR(36), -- Lead this share is intended for
+    lead_id UUID, -- Lead this share is intended for
     expires_at TIMESTAMP, -- Optional expiration
     password_hash VARCHAR(255), -- Optional password protection
     access_count INTEGER DEFAULT 0,
@@ -85,8 +87,8 @@ CREATE TABLE IF NOT EXISTS report_shares (
 -- Report delivery tracking
 CREATE TABLE IF NOT EXISTS report_deliveries (
     id SERIAL PRIMARY KEY,
-    report_id VARCHAR(36) NOT NULL,
-    lead_id VARCHAR(36) NOT NULL,
+    report_id UUID NOT NULL,
+    lead_id UUID NOT NULL,
     delivery_method VARCHAR(20) NOT NULL, -- email, sms, link, download
     delivery_address VARCHAR(255), -- Email address, phone number, etc.
     status VARCHAR(20) DEFAULT 'pending', -- pending, sent, delivered, failed, opened
@@ -121,7 +123,8 @@ INSERT INTO report_section_templates (section_id, title, description, default_pr
 ('challenges', 'Challenges & Solutions', 'Problem-solving showcase', 'Create a challenges and solutions section highlighting specific problems encountered and how they were expertly resolved.', 3),
 ('solutions', 'Our Solutions', 'Approach and methodology', 'Detail the specific solutions and approaches used to address the roofing challenges, emphasizing expertise and quality.', 4),
 ('results', 'Project Results', 'Outcome and impact summary', 'Summarize the successful project outcomes, improvements achieved, and long-term benefits for the homeowner.', 8),
-('maintenance_schedule', 'Maintenance Schedule', 'Ongoing care recommendations', 'Create a maintenance schedule section with recommended care activities, timing, and tips to extend roof life.', 6);
+('maintenance_schedule', 'Maintenance Schedule', 'Ongoing care recommendations', 'Create a maintenance schedule section with recommended care activities, timing, and tips to extend roof life.', 6)
+ON CONFLICT (section_id) DO NOTHING;
 
 -- Create indexes for better performance
 CREATE INDEX IF NOT EXISTS idx_reports_lead_id ON reports(lead_id);
@@ -155,8 +158,12 @@ BEGIN
 END;
 $$ language 'plpgsql';
 
-CREATE TRIGGER update_reports_updated_at BEFORE UPDATE ON reports
+DROP TRIGGER IF EXISTS update_reports_updated_at ON reports;
+CREATE TRIGGER update_reports_updated_at
+    BEFORE UPDATE ON reports
     FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 
-CREATE TRIGGER update_report_section_templates_updated_at BEFORE UPDATE ON report_section_templates
+DROP TRIGGER IF EXISTS update_report_section_templates_updated_at ON report_section_templates;
+CREATE TRIGGER update_report_section_templates_updated_at
+    BEFORE UPDATE ON report_section_templates
     FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();

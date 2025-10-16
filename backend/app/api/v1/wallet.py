@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import logging
 from typing import Any, Dict, List, Optional
 
+import httpx
 from fastapi import APIRouter, Depends, HTTPException, Path
 from pydantic import BaseModel, Field
 
@@ -19,6 +21,9 @@ from services.promotion_service import (
     redeem_promotion,
     serialize_promotion,
 )
+from config import get_settings
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/v1/wallet", tags=["wallet"])
 
@@ -211,7 +216,7 @@ def lock_wallet_promotion(
 
 
 @router.post("/checkout/confirm", response_model=WalletSummaryResponse)
-def confirm_wallet_checkout(
+async def confirm_wallet_checkout(
     payload: CheckoutConfirmRequest,
     current_user: User = Depends(get_current_user),
 ) -> WalletSummaryResponse:
@@ -226,26 +231,52 @@ def confirm_wallet_checkout(
         promotion_id = payload.promotion_id
         promotion_record: Optional[WalletPromotion] = None
         metadata: Dict[str, Any] = {}
+        billing_url = get_settings().billing_service_url
 
         if payload.session_id:
-            checkout_session = retrieve_checkout_session(payload.session_id)
-            if checkout_session:
-                if checkout_session.get("payment_status") != "paid":
-                    raise HTTPException(status_code=409, detail="Checkout session not completed")
-                amount_total = checkout_session.get("amount_total")
-                if amount_total:
-                    amount_cents = int(amount_total)
-                metadata = checkout_session.get("metadata") or {}
-                credit_meta = metadata.get("promotion_credit_amount") or metadata.get("credit_amount")
-                if credit_meta:
-                    credit_cents = int(credit_meta)
-                if not promotion_id and metadata.get("promotion_id"):
-                    promotion_id = int(metadata["promotion_id"])
-            else:
-                if amount_cents is None:
-                    raise HTTPException(status_code=400, detail="amount_cents required when session is unavailable")
-                if credit_cents is None:
-                    credit_cents = amount_cents
+            session_validated = False
+            if billing_url:
+                try:
+                    async with httpx.AsyncClient(timeout=10.0) as client:
+                        resp = await client.get(f"{billing_url.rstrip('/')}/checkout/{payload.session_id}")
+                    resp.raise_for_status()
+                    remote = resp.json()
+                    if remote.get("payment_status") != "paid":
+                        raise HTTPException(status_code=409, detail="Checkout session not completed")
+                    amount_total = remote.get("amount_total")
+                    if amount_total:
+                        amount_cents = int(amount_total)
+                    metadata = remote.get("metadata") or {}
+                    credit_meta = metadata.get("promotion_credit_amount") or metadata.get("credit_amount")
+                    if credit_meta:
+                        credit_cents = int(credit_meta)
+                    if not promotion_id and metadata.get("promotion_id"):
+                        promotion_id = int(metadata["promotion_id"])
+                    session_validated = True
+                except httpx.HTTPStatusError as exc:
+                    if exc.response.status_code != 404:
+                        logger.exception("wallet.remote_checkout_lookup_failed", error=str(exc))
+                except httpx.HTTPError as exc:
+                    logger.exception("wallet.remote_checkout_lookup_failed", error=str(exc))
+            if not session_validated:
+                checkout_session = retrieve_checkout_session(payload.session_id)
+                if checkout_session:
+                    if checkout_session.get("payment_status") != "paid":
+                        raise HTTPException(status_code=409, detail="Checkout session not completed")
+                    amount_total = checkout_session.get("amount_total")
+                    if amount_total:
+                        amount_cents = int(amount_total)
+                    metadata = checkout_session.get("metadata") or {}
+                    credit_meta = metadata.get("promotion_credit_amount") or metadata.get("credit_amount")
+                    if credit_meta:
+                        credit_cents = int(credit_meta)
+                    if not promotion_id and metadata.get("promotion_id"):
+                        promotion_id = int(metadata["promotion_id"])
+                else:
+                    if amount_cents is None:
+                        raise HTTPException(status_code=400, detail="amount_cents required when session is unavailable")
+                    if credit_cents is None:
+                        credit_cents = amount_cents
         else:
             if amount_cents is None:
                 raise HTTPException(status_code=400, detail="amount_cents required")

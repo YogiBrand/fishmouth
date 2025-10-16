@@ -51,7 +51,8 @@ CREATE TABLE IF NOT EXISTS leads (
   updated_at TIMESTAMPTZ DEFAULT now()
 );
 CREATE UNIQUE INDEX IF NOT EXISTS leads_dedupe_idx ON leads(dedupe_key);
--- Quick view to join geo
-CREATE VIEW IF NOT EXISTS leads_geo AS
+DROP VIEW IF EXISTS leads_geo;
+CREATE OR REPLACE VIEW leads_geo AS
 SELECT l.*, p.latitude, p.longitude, p.geom
-FROM leads l JOIN properties p ON p.id = l.property_id;
+FROM leads l
+JOIN properties p ON p.id = l.property_id;

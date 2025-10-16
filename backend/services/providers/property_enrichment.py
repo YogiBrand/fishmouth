@@ -181,7 +181,7 @@ class PropertyEnrichmentService:
         square_feet = None
         property_value = median_value or 300_000
 
-        return PropertyProfile(
+        profile = PropertyProfile(
             year_built=year_built,
             property_type="single_family",
             lot_size_sqft=lot_size,
@@ -193,6 +193,8 @@ class PropertyEnrichmentService:
             last_roof_replacement_year=None,
             source="fcc_census",
         )
+        profile = await self._augment_with_nominatim(profile, latitude, longitude)
+        return profile
 
     def _generate_fallback(self, address: str) -> PropertyProfile:
         seed = int(hashlib.sha1(address.encode("utf-8")).hexdigest(), 16) % (2**32)
@@ -222,6 +224,73 @@ class PropertyEnrichmentService:
             last_roof_replacement_year=last_replacement_year,
             source="synthetic",
         )
+
+    async def _augment_with_nominatim(self, profile: PropertyProfile, latitude: float, longitude: float) -> PropertyProfile:
+        params = {
+            "lat": f"{latitude}",
+            "lon": f"{longitude}",
+            "format": "jsonv2",
+            "addressdetails": 1,
+            "extratags": 1,
+        }
+        try:
+            async with self._rate_limiter:
+                resp = await self._client.get(
+                    "https://nominatim.openstreetmap.org/reverse",
+                    params=params,
+                    headers={"User-Agent": "FishMouthAI/1.0"},
+                )
+            resp.raise_for_status()
+            payload = resp.json()
+        except Exception:
+            return profile
+
+        extratags = payload.get("extratags") or {}
+        address = payload.get("address") or {}
+
+        roof_material = extratags.get("roof:material") or extratags.get("roof_material")
+        if roof_material:
+            profile.roof_material = roof_material.replace("_", " ")
+
+        building_type = extratags.get("building")
+        if building_type:
+            profile.property_type = building_type.replace("_", " ")
+
+        levels = extratags.get("building:levels")
+        if levels:
+            try:
+                profile.square_feet = profile.square_feet or int(float(levels) * 900)
+            except Exception:
+                pass
+
+        height = extratags.get("height")
+        if height and profile.square_feet is None:
+            try:
+                meters = float(str(height).replace("m", "").strip())
+                profile.square_feet = int(meters * 3.28084 * 450)
+            except Exception:
+                pass
+
+        if not profile.year_built:
+            year = extratags.get("building:year_built") or extratags.get("start_date")
+            if year:
+                try:
+                    profile.year_built = int(str(year).split("-")[0])
+                except Exception:
+                    pass
+
+        if not profile.property_value:
+            postcode = address.get("postcode")
+            if postcode:
+                try:
+                    seed = int(hashlib.sha1(postcode.encode("utf-8")).hexdigest(), 16) % (2**32)
+                    random.seed(seed)
+                    profile.property_value = random.randint(220_000, 520_000)
+                except Exception:
+                    pass
+
+        profile.source = f"{profile.source}+nominatim"
+        return profile
 
     async def aclose(self) -> None:
         await self._client.aclose()
